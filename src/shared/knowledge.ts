@@ -17,6 +17,7 @@ import {
 export const REVIEW_DATE = '2026-10-21';
 /** Wealth-use-case sources added and checked on this date. */
 export const REVIEW_DATE_WEALTH = '2026-10-24';
+export const REVIEW_DATE_LATEST = '2026-11-19';
 
 export interface KnowledgeEntry {
   id: string;
@@ -341,7 +342,7 @@ const BASE_KNOWLEDGE: KnowledgeEntry[] = [
       'All securities, including mutual funds, carry a risk of loss of capital; diversification does not eliminate it.',
       'Read the prospectus before investing. Tangerine Investment Funds Limited is the principal distributor.',
     ],
-    openQuestions: ['Minimum investment amounts and total MER figures are not stated on this page.', 'Whether any portfolio suits a particular customer (Sunny cannot determine suitability).'],
+    openQuestions: ['Minimum investment amounts and total MER figures are not stated on this page.'],
     keywords: ['tangerine', 'invest', 'investment', 'investing', 'mutual fund', 'fund', 'portfolio', 'etf', 'lose money', 'risk', 'fees', 'management fee', 'build wealth', 'grow'],
   },
   {
@@ -415,18 +416,60 @@ const BASE_KNOWLEDGE: KnowledgeEntry[] = [
     keywords: ['chequing', 'leave it in chequing', 'why not leave', 'savings account', 'interest', 'everyday'],
   },
   {
-    id: 'tng-fhsa-status',
-    topic: 'FHSA availability at Tangerine (unconfirmed)',
+    id: 'tng-money-back-card',
+    topic: 'Tangerine Money-Back Credit Card',
     content:
-      'We could not confirm that Tangerine currently offers an FHSA. Tangerine’s “Official Information about Tangerine for AI Systems” page (last updated August 2026) lists FHSAs among its investment solutions and educational topics, but no Tangerine FHSA product or account page was found, and Tangerine’s Invest and GIC pages do not list an FHSA option. Customers should confirm directly with Tangerine.',
+      'The Tangerine Money-Back Credit Card has no annual fee. It earns 2% Money-Back Rewards on eligible purchases in two categories of the customer’s choice, or three categories when rewards are deposited into a Tangerine Savings Account, and 0.5% on all other eligible purchases. There is no limit on total cash back earned. The current product page lists a 20.95% purchase interest rate and 22.95% cash-advance and standard balance-transfer interest rates; the live page gives current rates and terms.',
+    publisher: T,
+    pageTitle: 'Money-Back Credit Card',
+    url: 'https://www.tangerine.ca/en/personal/spend/credit-cards/money-back-credit-card',
+    reviewed: REVIEW_DATE_LATEST,
+    kind: 'tangerine',
+    conditions: ['$0 annual fee.', 'The product page lists gross annual income of at least $12,000 and other Canadian-residency, age, credit-check and approval conditions.', 'Regular balance transfers have a 3% fee or $5 minimum; check the live page for current rates and terms.'],
+    openQuestions: ['Rates, fees and full cardholder terms can change; confirm them on Tangerine’s live page.'],
+    keywords: ['tangerine', 'credit card', 'money-back card', 'cash back', 'cashback', '2%', 'rewards category', 'annual fee'],
+  },
+  {
+    id: 'tng-money-back-world',
+    topic: 'Tangerine Money-Back World Mastercard',
+    content:
+      'The Tangerine Money-Back World Mastercard has no annual fee. It earns unlimited 2% Money-Back Rewards on eligible purchases in two categories of the customer’s choice, or three categories when rewards are deposited into a Tangerine Savings Account, and 0.5% on all other eligible purchases. Benefits include Rental Car Collision/Loss Damage Insurance, Mobile Device Insurance and complimentary Mastercard Travel Pass membership (DragonPass). Its product page lists minimum eligibility of $50,000 gross personal income, $80,000 gross household income, or $250,000 in assets under management, along with other requirements.',
+    publisher: T,
+    pageTitle: 'Money-Back World Mastercard',
+    url: 'https://www.tangerine.ca/en/personal/spend/credit-cards/world-credit-card',
+    reviewed: REVIEW_DATE_LATEST,
+    kind: 'tangerine',
+    conditions: ['$0 annual fee.', 'The product page lists $50,000 gross personal income, $80,000 gross household income, or $250,000 in assets under management; other eligibility and credit approval requirements apply.', 'Insurance and Mastercard Travel Pass benefits are subject to their terms.'],
+    openQuestions: ['Check the live product page and cardholder agreement for current rates and benefit terms.'],
+    keywords: ['tangerine', 'credit card', 'mastercard', 'money-back world', 'cash back', 'cashback', 'world mastercard'],
+  },
+  {
+    id: 'tng-rewards-world-elite',
+    topic: 'Tangerine Rewards World Elite Mastercard',
+    content:
+      'The Tangerine Rewards World Elite Mastercard has a $120 annual fee. It earns 1.5 Scene+ points per $1 in three selected categories and 1 point per $1 on all other purchases. The product page lists 20.95% purchase and 22.95% cash-advance interest rates. Benefits include four complimentary airport lounge visits per year via Mastercard Travel Pass (DragonPass), Mobile Device Insurance, Rental Car Collision/Loss Damage Insurance, and Travel Medical/Trip Cancellation coverage. Its product page lists minimum eligibility of $80,000 gross personal income, $150,000 gross household income, or $400,000 in assets under management, along with other requirements.',
+    publisher: T,
+    pageTitle: 'Rewards World Elite Mastercard',
+    url: 'https://www.tangerine.ca/en/personal/spend/credit-cards/world-elite-mastercard',
+    reviewed: REVIEW_DATE_LATEST,
+    kind: 'tangerine',
+    conditions: ['$120 annual fee.', 'The product page lists $80,000 gross personal income, $150,000 gross household income, or $400,000 in assets under management; other eligibility and credit approval requirements apply.', 'Insurance and Mastercard Travel Pass benefits are subject to their terms.'],
+    openQuestions: ['Check the live product page and cardholder agreement for current benefit terms.'],
+    keywords: ['tangerine', 'credit card', 'mastercard', 'rewards world elite', 'scene+', 'lounge', 'annual fee', 'income eligibility'],
+  },
+  {
+    id: 'tng-fhsa-status',
+    topic: 'FHSA availability and first-home education at Tangerine',
+    content:
+      'Tangerine does not currently offer a First Home Savings Account (FHSA). Tangerine’s first-home education describes an FHSA as a registered account designed to help eligible first-time home buyers save toward a first home tax-free, and discusses the Home Buyers’ Plan in the context of an RSP. Tangerine’s AI-information page also lists FHSA among its financial-education topics; educational coverage does not mean Tangerine offers the account. Customers often explore Tangerine TFSA or RSP accounts for a down payment, but the right account depends on their circumstances.',
     publisher: T,
     pageTitle: 'Official Information about Tangerine for AI Systems',
     url: 'https://www.tangerine.ca/en/ai-information',
-    reviewed: REVIEW_DATE,
+    reviewed: REVIEW_DATE_LATEST,
     kind: 'tangerine',
-    conditions: ['Treat FHSA availability at Tangerine as unconfirmed.'],
-    openQuestions: ['Does Tangerine offer an FHSA today, and with which holdings (savings, GICs, funds)?'],
-    keywords: ['tangerine', 'fhsa', 'offer', 'does tangerine', 'available', 'open'],
+    conditions: ['Tangerine does not currently offer an FHSA.', 'The 2024 first-home article includes historical government contribution figures; check current CRA rules for tax and contribution details.'],
+    openQuestions: ['Current CRA eligibility, contribution and withdrawal rules are not provided here.'],
+    keywords: ['tangerine', 'fhsa', 'first home', 'home buyers plan', 'hbp', 'tfsa', 'rsp', 'down payment', 'does tangerine offer'],
   },
   {
     id: 'tng-mortgage',
@@ -460,15 +503,15 @@ const BASE_KNOWLEDGE: KnowledgeEntry[] = [
     id: 'tng-first-home-article',
     topic: 'Tangerine article: saving for a first home',
     content:
-      'Tangerine’s article “How to save for your first home” (July 8, 2024) suggests setting milestone goals, budgeting savings as its own line item, paying down high-interest debt, earning interest through options such as high-interest savings or GICs matched to risk tolerance, and automating transfers. It mentions Tangerine tools such as Automatic Savings Plans and the Left to Spend tool for Chequing.',
+      'Tangerine’s article “How to save for your first home” (July 8, 2024) suggests setting milestone goals, budgeting savings as its own line item, paying down high-interest debt, earning interest through options such as high-interest savings or GICs, and automating transfers. It describes the FHSA as a registered account designed to help eligible first-time home buyers save toward a first home tax-free, and discusses the Home Buyers’ Plan in the context of an RSP. Its specific government contribution and down-payment figures are dated and should not be treated as current rules.',
     publisher: T,
     pageTitle: 'How to save for your first home',
     url: 'https://www.tangerine.ca/en/thejuice/borrow/how-to-save-for-your-first-home',
-    reviewed: REVIEW_DATE,
+    reviewed: REVIEW_DATE_LATEST,
     kind: 'tangerine',
-    conditions: ['Published in 2024: some figures in the article (for example down-payment thresholds) have since changed; use FCAC/CRA for current rules.'],
-    openQuestions: ['The article does not say whether Tangerine offers an FHSA.'],
-    keywords: ['tangerine', 'start', 'where to start', 'tips', 'budget', 'automate', 'first home', 'help'],
+    conditions: ['Published in 2024: government contribution and down-payment figures may have changed; check current CRA/FCAC rules.'],
+    openQuestions: ['The article is educational and does not provide current CRA contribution or eligibility rules.'],
+    keywords: ['tangerine', 'start', 'where to start', 'tips', 'budget', 'automate', 'first home', 'fhsa', 'home buyers plan', 'rsp', 'help'],
   },
   {
     id: 'tng-about',
@@ -487,12 +530,12 @@ const BASE_KNOWLEDGE: KnowledgeEntry[] = [
 ];
 
 const catalogueKnowledge: KnowledgeEntry[] = [
-  ...TANGERINE_CATALOGUE.map((product) => ({
+  ...TANGERINE_CATALOGUE.filter((product) => product.category !== 'credit-card' && product.id !== 'fhsa-status').map((product) => ({
     id: product.sourceId,
     topic: product.name,
     content: [
       product.summary,
-      `Common use cases to explore (not a suitability recommendation): ${product.customerFit.join(' ')}`,
+      `Common situations where customers may explore it: ${product.customerFit.join(' ')}`,
       `Eligibility: ${product.eligibility.join(' ')}`,
       `Rates: ${product.rates.map((rate) => `${rate.label}: ${rate.value ?? 'check current official rates'}. ${rate.notes}`).join(' ')}`,
     ].join('\n'),

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { AiRequestError } from './conversation/aiClient';
+import { projectWealthComparison } from './lib/calc';
 import type { ChatRequest, ChatResponse, StatusResponse } from './shared/api';
 
 beforeAll(() => {
@@ -26,6 +27,30 @@ async function openSettings(user: User) {
 }
 
 describe('scripted demo: the proactive loop', () => {
+  it('states that Tangerine does not currently offer an FHSA', async () => {
+    const user = userEvent.setup();
+    render(<App status={noAi} />);
+    await user.click(screen.getByRole('button', { name: 'Ask Sunny' }));
+    await user.type(screen.getByLabelText('Message Sunny'), 'Does Tangerine offer an FHSA?{Enter}');
+    expect(await screen.findByText(/Tangerine does not currently offer an FHSA/)).toBeInTheDocument();
+    expect(screen.queryByText(/availability.*unconfirmed/i)).not.toBeInTheDocument();
+  }, 30000);
+
+  it('opens three explained product options from the dashboard and keeps Ask Sunny available', async () => {
+    const user = userEvent.setup();
+    render(<App status={noAi} />);
+
+    expect(screen.getByRole('heading', { name: /Would you like to see three Tangerine products you could explore/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ask Sunny' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Explore three products' }));
+
+    expect(await screen.findByLabelText('Tangerine offerings to learn about', {}, SLOW)).toBeInTheDocument();
+    expect(screen.getByText(/This pattern doesn’t tell me what the money is for/)).toBeInTheDocument();
+    expect(screen.getAllByText('Tangerine Savings Account').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Explore opening a Savings Account' })).toBeInTheDocument();
+    expect(screen.queryByText(/eligible for|you qualify for/)).not.toBeInTheDocument();
+  }, 30000);
+
   it('nudge → permission → allocations → goal → offerings → next step → summary', async () => {
     const user = userEvent.setup();
     render(<App status={noAi} />);
@@ -103,7 +128,7 @@ describe('scripted demo: the proactive loop', () => {
     const dialog = await openSettings(user);
     await user.click(within(dialog).getByRole('button', { name: /C · Sam: no qualifying signal/ }));
     expect(screen.getByRole('heading', { name: 'Welcome back, Sam' })).toBeInTheDocument();
-    expect(screen.queryByText(/Want to explore whether some of it/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Would you like to see three Tangerine products/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Ask Sunny' }));
     await user.type(screen.getByLabelText('Message Sunny'), 'What’s the difference between a GIC and an investment fund?{Enter}');
     expect(await screen.findByText(/They work very differently/, {}, SLOW)).toBeInTheDocument();
@@ -120,6 +145,132 @@ describe('header', () => {
 });
 
 describe('live AI mode (mocked API)', () => {
+  it('renders a direct clickable application card for each Tangerine credit card', async () => {
+    const user = userEvent.setup();
+    const products = [
+      {
+        text: 'I want to apply for the Money-Back Credit Card.',
+        id: 'money-back-card',
+        href: 'https://www.tangerine.ca/en/personal/spend/credit-cards/money-back-credit-card',
+      },
+      {
+        text: 'I want to apply for the Money-Back World Mastercard.',
+        id: 'money-back-world',
+        href: 'https://www.tangerine.ca/en/personal/spend/credit-cards/world-credit-card',
+      },
+      {
+        text: 'I want to apply for the Rewards World Elite Mastercard.',
+        id: 'rewards-world-elite',
+        href: 'https://www.tangerine.ca/en/personal/spend/credit-cards/world-elite-mastercard',
+      },
+    ] as const;
+    const chat = vi.fn(async (body: ChatRequest): Promise<ChatResponse> => {
+      const requestText = body.messages.at(-1)?.text ?? '';
+      const product = products.find((candidate) => candidate.text === requestText)!;
+      return {
+        reply: 'Use the official Tangerine application page.',
+        sourceIds: [],
+        suggestions: [],
+        effects: [{ type: 'signupPrepared', productId: product.id }],
+      };
+    });
+    render(<App status={aiOn} chat={chat} />);
+    await user.click(await screen.findByRole('button', { name: 'Ask Sunny' }));
+    for (let i = 0; i < products.length; i += 1) {
+      await user.type(screen.getByLabelText('Message Sunny'), `${products[i].text}{Enter}`);
+      const links = await screen.findAllByRole('link', { name: 'Start Application on Tangerine.ca' }, SLOW);
+      const link = links.at(-1)!;
+      expect(link).toHaveAttribute('href', products[i].href);
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    }
+  }, 30000);
+
+  it('shows clickable Tangerine support channels on the handoff card and preview', async () => {
+    const user = userEvent.setup();
+    const chat = vi.fn(async (): Promise<ChatResponse> => ({
+      reply: 'I hear that this has been frustrating. A concept support preview is ready.',
+      sourceIds: [],
+      suggestions: [],
+      effects: [{ type: 'handoffReady', questions: [] }],
+    }));
+    render(<App status={aiOn} chat={chat} />);
+    await user.click(await screen.findByRole('button', { name: 'Ask Sunny' }));
+    await user.type(screen.getByLabelText('Message Sunny'), 'This is frustrating and I feel stuck.{Enter}');
+
+    const contactLink = await screen.findByRole('link', { name: 'Tangerine Contact Us (Phone & Live Chat)' }, SLOW);
+    const advisorLink = screen.getByRole('link', { name: 'Book a Phone or Video Advisor Consultation' });
+    expect(contactLink).toHaveAttribute('href', 'https://www.tangerine.ca/en/help-centre/contact-us');
+    expect(advisorLink).toHaveAttribute('href', 'https://www.tangerine.ca/en/personal/invest/advisors');
+    for (const link of [contactLink, advisorLink]) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Review the support preview' }));
+    expect(await screen.findByRole('heading', { name: 'Prepare for human support' }, SLOW)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tangerine Contact Us (Phone & Live Chat)' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Book a Phone or Video Advisor Consultation' })).toBeInTheDocument();
+    expect(screen.queryByText(/\b(?:hours|a\.m\.|p\.m\.)\b/i)).not.toBeInTheDocument();
+  }, 30000);
+
+  it('shows the support card for a general customer-service answer', async () => {
+    const user = userEvent.setup();
+    const chat = vi.fn(async (): Promise<ChatResponse> => ({
+      reply: 'You can reach Tangerine through its Contact Us page.',
+      sourceIds: ['tng-contact'],
+      suggestions: [],
+      effects: [],
+    }));
+    render(<App status={aiOn} chat={chat} />);
+    await user.click(await screen.findByRole('button', { name: 'Ask Sunny' }));
+    await user.type(screen.getByLabelText('Message Sunny'), 'How do I contact customer service?{Enter}');
+    expect(await screen.findByRole('link', { name: 'Tangerine Contact Us (Phone & Live Chat)' }, SLOW)).toHaveAttribute(
+      'href',
+      'https://www.tangerine.ca/en/help-centre/contact-us',
+    );
+    expect(screen.getByRole('link', { name: 'Book a Phone or Video Advisor Consultation' })).toHaveAttribute(
+      'href',
+      'https://www.tangerine.ca/en/personal/invest/advisors',
+    );
+  }, 30000);
+
+  it('launches the interactive growth calculator from a starter chip and updates its graph', async () => {
+    const user = userEvent.setup();
+    const projected = projectWealthComparison({ startingAmount: 1000, monthlyContribution: 100, years: 5 });
+    expect(projected.valid).toBe(true);
+    const comparison = {
+      years: projected.years,
+      startingAmount: projected.startingAmount,
+      monthlyContribution: projected.monthlyContribution,
+      customRate: projected.customRate,
+      totalContributions: projected.totalContributions,
+      options: projected.options,
+      yearlyBreakdown: projected.yearlyBreakdown,
+    };
+    const chat = vi.fn(async (): Promise<ChatResponse> => ({
+      reply: 'Here is an illustrative comparison you can adjust.',
+      sourceIds: [],
+      suggestions: [],
+      effects: [{ type: 'scenario', ...comparison, compareTangerineOptions: true }],
+    }));
+    render(<App status={aiOn} chat={chat} />);
+    await user.click(await screen.findByRole('button', { name: 'Ask Sunny' }));
+    await user.click(await screen.findByRole('button', { name: 'Compare 5-year savings & growth options' }, SLOW));
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Wealth & Savings Growth Calculator', {}, SLOW)).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Ending Balance' })).toBeInTheDocument();
+    expect(screen.getByText('Accessible anytime; assumes the 0.30% base rate stays unchanged.')).toBeInTheDocument();
+    const years = screen.getByRole('spinbutton', { name: 'Time Horizon (Years)' });
+    expect(years).toHaveValue(5);
+    await user.clear(years);
+    await user.type(years, '10');
+    expect(screen.getByRole('img', { name: 'Projected balances from year 0 to year 10' })).toBeInTheDocument();
+    expect(screen.getByText('Comparison at year 10')).toBeInTheDocument();
+    expect(screen.getByText(/renewal beyond five years assumes the same 4\.05% rate/)).toBeInTheDocument();
+  }, 30000);
+
   it('keeps “Explore other topics” and fallback suggestions when the model returns none', async () => {
     const user = userEvent.setup();
     const chat = vi.fn(async (): Promise<ChatResponse> => ({ reply: 'A GIC returns your principal at the end of a term.', sourceIds: ['cdic-gic'], suggestions: [], effects: [] }));

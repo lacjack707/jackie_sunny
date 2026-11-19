@@ -63,6 +63,23 @@ describe('dashboard signal and nudge', () => {
     expect(dashboardCard(run(fresh(), { type: 'setProfileFlags', reviewFlag: true }))).toBeNull();
     expect(dashboardCard(run(fresh(), { type: 'setProfileFlags', historyDaysAvailable: 30 }))).toBeNull();
   });
+
+  it('opens product recommendations directly and keeps the banner until the customer engages', () => {
+    const s = run(fresh(), { type: 'open', origin: 'recommendation' });
+    const card = s.messages.find((message) => message.card?.kind === 'offerings')?.card;
+    expect(s.stage).toBe('explore');
+    expect(s.memory.permission).toBe('not_asked');
+    expect(card).toMatchObject({
+      kind: 'offerings',
+      ids: ['savings-account', 'gic', 'tfsa'],
+      promotionIds: [],
+    });
+    if (card?.kind === 'offerings') expect(Object.keys(card.reasons ?? [])).toHaveLength(3);
+    expect(getPrompt(s).replies.map((item) => item.label)).toContain('Explore opening a Savings Account');
+    expect(dashboardCard(s)?.kind).toBe('nudge');
+    expect(dashboardCard(run(s, { type: 'setGoal', goal: { type: 'accessible_interest', detail: null } }))).toBeNull();
+    expect(allText(s)).toMatch(/This pattern doesn’t tell me what the money is for/);
+  });
 });
 
 describe('main demo loop (scripted)', () => {
@@ -97,12 +114,15 @@ describe('main demo loop (scripted)', () => {
     s = click(s, 'More than 5 years away');
     const offers = s.messages.find((m) => m.card?.kind === 'offerings')?.card;
     expect(offers).toMatchObject({ kind: 'offerings' });
-    if (offers?.kind === 'offerings') expect(offers.ids).toEqual(expect.arrayContaining(['investment-funds', 'tfsa', 'rsp', 'gic']));
+    if (offers?.kind === 'offerings') expect(offers.ids).toEqual(['investment-funds', 'tfsa', 'rsp']);
     if (offers?.kind === 'offerings') {
       expect(offers.featuredId).toBe('investment-funds');
-      expect(offers.featuredReason).toMatch(/Tangerine Investment Funds is a specific Tangerine product to explore first/);
+      expect(Object.keys(offers.reasons ?? {})).toHaveLength(3);
+      expect(offers.reasons?.['investment-funds']).toMatch(/longer timeframe/);
+      expect(offers.reasons?.tfsa).toMatch(/tax treatment/);
+      expect(offers.reasons?.rsp).toMatch(/retirement account/);
     }
-    expect(allText(s)).toMatch(/optional Tangerine products to explore/);
+    expect(allText(s)).toMatch(/three products to explore/);
     s = click(s, 'Learn about investment risk first');
     expect(s.memory.nextStep).toBe('learn_risk');
     expect(allText(s)).toMatch(/you can lose money/);
@@ -185,15 +205,33 @@ describe('education before any goal', () => {
     s = typed(s, 'Why did you recommend these products?');
     expect(lastSunny(s)).toMatch(/goal is build wealth over time and your timeframe is more than 5 years/);
     expect(lastSunny(s)).toMatch(/Tangerine Investment Funds/);
-    expect(lastSunny(s)).toMatch(/not because I’ve assessed personal suitability/);
-    expect(lastSunny(s)).toMatch(/It’s completely your choice/);
+    expect(lastSunny(s)).not.toMatch(/personal suitability assessment/i);
   });
 
   it('responds to a request for product suggestions with optional offerings to explore', () => {
     const s = typed(run(fresh(), { type: 'open', origin: 'self' }), 'Which Tangerine products should I explore?');
-    expect(s.messages.some((m) => m.card?.kind === 'offerings')).toBe(true);
-    expect(allText(s)).toMatch(/optional products to explore/);
+    const offerings = s.messages.find((m) => m.card?.kind === 'offerings')?.card;
+    expect(offerings?.kind === 'offerings' ? offerings.ids : []).toHaveLength(3);
+    expect(offerings?.kind === 'offerings' ? Object.keys(offerings.reasons ?? {}) : []).toHaveLength(3);
+    expect(allText(s)).toMatch(/three products to explore/);
     expect(getPrompt(s).replies.map((item) => item.label)).toContain('Explore opening a Savings Account');
+  });
+
+  it('keeps credit-card questions focused on Tangerine card products', () => {
+    const state = run(fresh(), { type: 'open', origin: 'self' });
+    const family = typed(state, 'What Tangerine credit card offerings do you have?');
+    const familyCard = family.messages.find((message) => message.card?.kind === 'offerings')?.card;
+    expect(familyCard?.kind === 'offerings' ? familyCard.ids : []).toEqual([
+      'money-back-card',
+      'money-back-world',
+      'rewards-world-elite',
+    ]);
+    expect(allText(family)).toMatch(/credit cards/);
+
+    const specific = typed(state, 'Tell me about the Tangerine Money-Back Credit Card.');
+    const specificCard = specific.messages.find((message) => message.card?.kind === 'offerings')?.card;
+    expect(specificCard?.kind === 'offerings' ? specificCard.ids : []).toEqual(['money-back-card']);
+    expect(allText(specific)).not.toMatch(/three products to explore/);
   });
 
   it('starts a Savings Account next-step card only when the customer asks to open one', () => {
@@ -314,7 +352,7 @@ describe('AI effects are re-validated', () => {
     expect(allText(s)).toMatch(/more than the \$28,000 in your chequing account, so I haven’t saved it/);
     s = respond(s, { sourceIds: ['tng-investment-funds', 'made-up'], effects: [{ type: 'offeringsShown', ids: ['investment-funds', 'crypto-fund'], reason: 'You asked' }] });
     expect(s.messages.find((m) => m.ai && m.text === 'ok' && m.sources)?.sources).toEqual(['tng-investment-funds']);
-    expect(s.messages.at(-1)?.card).toMatchObject({ kind: 'offerings', ids: ['investment-funds'] });
+    expect(s.messages.at(-1)?.card).toMatchObject({ kind: 'offerings', ids: ['savings-account', 'gic', 'tfsa'] });
   });
 
   it('applies valid goal, horizon, next step and allocations', () => {
@@ -331,8 +369,8 @@ describe('AI effects are re-validated', () => {
   });
 
   it('renders the signup next step from a validated AI effect', () => {
-    const s = respond(aiState(), { effects: [{ type: 'signupPrepared', productId: 'moneyback-card' }] });
-    expect(s.messages.some((m) => m.card?.kind === 'signup' && m.card.productId === 'moneyback-card')).toBe(true);
+    const s = respond(aiState(), { effects: [{ type: 'signupPrepared', productId: 'money-back-card' }] });
+    expect(s.messages.some((m) => m.card?.kind === 'signup' && m.card.productId === 'money-back-card')).toBe(true);
   });
 });
 

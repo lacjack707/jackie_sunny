@@ -48,7 +48,7 @@ export function buildChatRequest(state: ConversationState): ChatRequest {
           monthlyIncome: state.profile.monthlyIncome,
           monthlyExpenses: state.profile.monthlyExpenses,
           signal:
-            state.origin === 'nudge' || m.prompt === 'nudge'
+            state.origin === 'nudge' || state.origin === 'recommendation' || m.prompt === 'nudge' || m.prompt === 'recommendation'
               ? {
                   rule: 'elevated_chequing_balance',
                   shown: true,

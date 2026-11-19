@@ -723,6 +723,109 @@ textarea {
   font-size: 0.8rem;
   color: var(--ink-soft);
 }
+.wealth-comparison-card {
+  min-width: 0;
+  overflow: hidden;
+}
+.wealth-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+.wealth-control {
+  display: grid;
+  gap: 6px;
+}
+.wealth-control label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.wealth-number-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wealth-number-input input {
+  min-width: 0;
+  width: 100%;
+}
+.wealth-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--orange-600);
+}
+.wealth-chart {
+  min-width: 0;
+  overflow-x: auto;
+}
+.wealth-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 480px;
+  height: auto;
+}
+.wealth-gridline line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.wealth-gridline text,
+.wealth-year-label {
+  fill: var(--ink-soft);
+  font-size: 11px;
+}
+.wealth-axis {
+  stroke: var(--ink-soft);
+  stroke-width: 1;
+}
+.wealth-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 0.8rem;
+}
+.wealth-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wealth-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.wealth-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.wealth-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.wealth-table caption {
+  margin-bottom: 8px;
+  text-align: left;
+  font-weight: 600;
+}
+.wealth-table th,
+.wealth-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.wealth-table thead th {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}
+.wealth-table tbody th {
+  min-width: 155px;
+}
+.wealth-table td:nth-child(3),
+.wealth-table td:nth-child(4) {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .draft-tag {
   font-style: italic;
 }
@@ -1398,6 +1501,12 @@ textarea {
   .drawer-grid {
     grid-template-columns: 1fr;
   }
+  .wealth-controls {
+    grid-template-columns: 1fr;
+  }
+  .wealth-chart svg {
+    min-width: 560px;
+  }
   .figures {
     grid-template-columns: 1fr 1fr;
   }
@@ -1475,6 +1584,40 @@ textarea {
   padding: 24px 28px;
   box-shadow: var(--shadow);
 }
+.insight-opportunity {
+  background: linear-gradient(120deg, var(--orange-600), var(--orange-700));
+  border-color: var(--orange-700);
+  color: #fff;
+}
+.insight-opportunity .insight-title,
+.insight-opportunity .eyebrow,
+.insight-opportunity .insight-copy,
+.insight-opportunity .why summary,
+.insight-opportunity .why p {
+  color: #fff;
+}
+.insight-opportunity .btn-primary {
+  background: #fff;
+  color: var(--orange-700);
+}
+.insight-opportunity .btn-primary:hover:not(:disabled) {
+  background: var(--orange-50);
+}
+.insight-opportunity .btn-secondary {
+  background: transparent;
+  border-color: rgb(255 255 255 / 75%);
+  color: #fff;
+}
+.insight-opportunity .btn-secondary:hover:not(:disabled) {
+  background: rgb(255 255 255 / 12%);
+  border-color: #fff;
+}
+.insight-opportunity .btn-ghost {
+  color: #fff;
+}
+.insight-opportunity .btn-ghost:hover {
+  color: #fff;
+}
 .insight-body {
   display: grid;
   gap: 12px;
@@ -1485,6 +1628,11 @@ textarea {
   letter-spacing: -0.01em;
   line-height: 1.35;
   font-weight: 600;
+}
+.insight-copy {
+  max-width: 72ch;
+  color: var(--ink-soft);
+  line-height: 1.5;
 }
 .insight-actions {
   display: flex;

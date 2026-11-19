@@ -49,9 +49,9 @@ const listAllocations = (items: Allocation[]) =>
   items.map((a) => `${money(a.amount)} ${a.purpose === 'emergency' ? 'is your emergency reserve' : `is for ${PURPOSE_LABEL[a.purpose].toLowerCase()}`}`).join(' and ');
 
 const OFFERINGS_INTRO = {
-  build_wealth: 'You mentioned wanting to understand longer-term investing. I can show you optional Tangerine products to explore, including their features, fees and risks. Investment funds can lose value; I won’t tell you whether or what to invest in.',
+  build_wealth: 'You mentioned wanting to understand longer-term investing. Here are Tangerine products to explore, with their features, fees and risks. Investment funds can lose value.',
   accessible_interest: 'You mentioned keeping money accessible while earning interest. I can show you Tangerine products to compare, including their features and conditions.',
-  first_home: 'You mentioned saving for a first home. I can show you Tangerine products to explore. I couldn’t confirm whether Tangerine offers an FHSA, so I’ll be clear about that uncertainty.',
+  first_home: 'You mentioned saving for a first home. Tangerine does not currently offer an FHSA, but I can show you Tangerine TFSA and RSP options that people often compare for a first-home goal.',
   understand_options: 'You wanted to understand the options before deciding. I can show you what Tangerine offers, including features, fees and risks.',
   other: 'I can show you some Tangerine products to explore, with their features, fees and risks.',
   } satisfies Record<GoalType, string>;
@@ -126,11 +126,11 @@ export const script = {
           : horizon === 'not_sure'
             ? 'so I kept the options flexible while the timing is uncertain.'
             : 'so I could show options related to that goal.';
-    return `${basis}, ${detail} I included ${listed} to help you compare, not because I’ve assessed personal suitability or think you should open or invest in any of them. It’s completely your choice to explore, choose none, or ask for more information.`;
+    return `${basis}, ${detail} I included ${listed} to help you compare. You can explore any, all, or none of them.`;
   },
   /** Introduction for the initial product exploration, shaped by goal and timeline. */
   offeringsIntroFor: (goal: GoalType | null, horizon: Horizon | null, emphasis: Emphasis) => {
-    const tail = ' These are optional products to explore, not a personal suitability assessment; choosing none is fine.';
+    const tail = ' Here are three products to explore; you can choose any, all, or none.';
     switch (emphasis) {
       case 'access':
         return `Since you might need this money within a year, I can show you our options focused on access and stability, including restrictions to know about (for example, our GICs generally can’t be cashed before maturity).${tail}`;
@@ -139,7 +139,7 @@ export const script = {
           ? `With a one-to-five-year timeline, I can show you our options that keep money accessible or stable${goal === 'build_wealth' || goal === 'understand_options' ? ', plus investment funds to learn about, since values can go down as well as up over shorter periods' : ''}.${tail}`
           : OFFERINGS_INTRO[goal ?? 'understand_options'];
       case 'growth':
-        return OFFERINGS_INTRO.build_wealth;
+        return `${OFFERINGS_INTRO.build_wealth}${tail}`;
       case 'flexible':
         return `Since the timing isn’t settled yet, I can show you some of our flexible options. Knowing roughly when you’d need the money could help you explore what matters to you.${tail}`;
     }

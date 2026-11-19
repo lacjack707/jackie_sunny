@@ -36,7 +36,7 @@ The rule checks, in order:
 4. **Earmark.** If the customer said the money is already set aside, the status is `suppressed_earmarked` (permanent for this scenario).
 5. **Snooze.** If the customer chose “Not now”, the status is `suppressed_dismissed` for 30 simulated days.
 
-Otherwise the status is `qualifies`. If some days in the window have no data (allowed up to the coverage rule), the nudge and *Why am I seeing this?* say “on all observed days” and state how many days had data (`signalSentence`, `explainSignal`, `nudgeHeadline`). The dashboard also won’t repeat the opportunity nudge once the customer has engaged with it (allocations, goal or next step from a nudge conversation), because continuity moves to check-ins (`engagedWithNudge`).
+Otherwise the status is `qualifies`. If some days in the window have no data (allowed up to the coverage rule), the dashboard and *Why am I seeing this?* say “on all observed days” and state how many days had data (`signalSentence`, `explainSignal`, `nudgeHeadline`). The orange insight offers two paths: `recommendation` opens three general product options immediately (the pattern is not treated as a goal or evidence of offer eligibility), while `nudge` asks permission and clarifies the customer's purpose. It remains visible after product options are shown, until the customer dismisses it, marks the money as set aside, or engages with the goal conversation (`engagedWithNudge`).
 
 **The signal only identifies a reason to ask a question.** It never sets an amount, suitability or a product. Evidence includes the window dates, days with data, coverage, min/max/average balance, days below the threshold and the current balance.
 
@@ -50,7 +50,7 @@ Synthetic histories (`domain/history.ts`): pay on the 1st and 15th, rent on the 
 
 ## State (`src/conversation/types.ts`)
 
-- `profile`: the synthetic relationship. `todayIndex`: the simulated day. `signalConfig`. `mode` (`ai` | `scripted`). `view`. `stage` (scripted flow). `origin` (`nudge` | `self` | `checkin`).
+- `profile`: the synthetic relationship. `todayIndex`: the simulated day. `signalConfig`. `mode` (`ai` | `scripted`). `view`. `stage` (scripted flow). `origin` (`nudge` | `recommendation` | `self` | `checkin`).
 - **Permission** is per session. It resets on a simulated later visit and whenever saved memory is loaded (`normalizeMemory`), and can be revoked in the chat (`revokePermission`). Messages built from account details are flagged `accountDetail`; `buildChatRequest` omits them unless permission is currently granted, so retained history can’t bypass the boundary.
 - `memory` (persisted per scenario in localStorage; synthetic only; old saved memory is migrated by `normalizeMemory`):
   - `permission`, `allocations`, `goal` (type + the customer’s words), `horizon`, `nextStep`, `prompt` (what started it)
@@ -84,7 +84,7 @@ Earmarks: education and *Explore a different goal* never change `prefs.earmarked
 |---|---|
 | `record_allocation` | Quote from the latest message; amount in the quote; not negative; ≤ balance (when shared) |
 | `record_goal` / `record_time_horizon` / `record_next_step` | Quote from the latest message **and** words expressing that choice (a live test found the model recording a next step the customer hadn’t chosen) |
-| `show_offerings` | Only real offering ids; only after a goal or when asked about options. The same `offeringPlan(goal, horizon)` rule as scripted mode limits initial recommendations; naming a product adds it, while an explicit browse request deterministically shows the entire catalogue regardless of the model-supplied ids. |
+| `show_offerings` | Only real offering ids; only after a goal or when asked about options. Broad exploration uses the shared `offeringPlan(goal, horizon)` three-product starting set; a specific product or product-family question stays focused on the directly relevant product(s). Generic credit-card questions return the related credit-card family, not unrelated account products. An explicit browse request deterministically shows the entire catalogue regardless of the model-supplied ids. |
 | `calculate_scenario` | Values from customer messages or computed allocations; contributions only, no returns |
 | `read_account_snapshot` / `request_account_permission` | Only with permission / only for personal-number questions |
 | `prepare_summary` / `prepare_support_preview` | Only when the customer asks |
@@ -102,8 +102,8 @@ Google Gemini via the official `@google/genai` SDK (Interactions API, stateless 
 
 Through the real local API, with Alex’s context and permission granted:
 - **Allocations:** recorded correctly, with $15,000 not yet assigned computed in code.
-- **Goal and offerings:** the goal and timeline shape optional Tangerine product suggestions; Sunny explains the reason for the options shown and does not claim personal suitability.
-- **Complete product browse:** product details include eligibility, live-rate guidance, fees, limitations and Tangerine source links. The FHSA entry is clearly unconfirmed and links only to Tangerine information by default. Current payroll and Money-Back Card offers appear only when explicit customer statements match the offer conditions and the offer is still within its freshness window; displaying an offer never implies qualification.
+- **Goal and offerings:** broad exploration uses a three-option optional Tangerine starting set shaped by goal and timeline; specific product questions show only directly relevant products. Each shown product gets an individual reason and trade-off. The app avoids repeating generic suitability disclaimers and states relevant boundaries when the customer asks for personal financial or investment advice.
+- **Complete product browse:** product details include eligibility, live-rate guidance, fees, limitations and Tangerine source links. Tangerine does not currently offer an FHSA; first-home education points neutrally to Tangerine TFSA and RSP alternatives and uses CRA/FCAC details only for uncovered or requested government rules. Each Tangerine credit card has a clickable official next-step card, and no application is submitted by the prototype. Current payroll and Money-Back Card offers appear only when explicit customer statements match the offer conditions and the offer is still within its freshness window; displaying an offer never implies qualification.
 - **Relevant signup prompts:** continue/open prompts are limited to products actually shown (unless the customer directly asks to open or apply); no application or eligibility check occurs in Sunny.
 - **Horizon:** recorded.
 - **“Can I lose money?”:** answered with sources.

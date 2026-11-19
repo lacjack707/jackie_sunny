@@ -166,17 +166,23 @@ function InsightCard({
   }
   const { signal } = card;
   return (
-    <section className="insight" aria-labelledby="insight-title">
+    <section className="insight insight-opportunity" aria-labelledby="insight-title">
       <div className="insight-orb" aria-hidden="true">
         <SunnyOrb size={56} />
       </div>
       <div className="insight-body">
-        <p className="eyebrow">Sunny · Insight</p>
+        <p className="eyebrow">Sunny · A pattern to explore</p>
         <h2 id="insight-title" className="insight-title">
-          {nudgeHeadline(signal, state.signalConfig.observationDays)} Want to explore whether some of it could support a financial goal?
+          {nudgeHeadline(signal, state.signalConfig.observationDays)} Would you like to see three Tangerine products you could explore?
         </h2>
+        <p className="insight-copy">
+          This pattern doesn’t tell us what the money is for. Sunny can show a few starting options, explain why they’re included, and help you continue to an official Tangerine page if one interests you.
+        </p>
         <div className="insight-actions">
-          <button type="button" className="btn btn-primary" onClick={() => onOpen('nudge')}>
+          <button type="button" className="btn btn-primary" onClick={() => onOpen('recommendation')}>
+            Explore three products
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => onOpen('nudge')}>
             Explore with Sunny
           </button>
           <button type="button" className="btn btn-secondary" onClick={() => dispatch({ type: 'earmarkFromDashboard' })}>
@@ -194,4 +200,3 @@ function InsightCard({
     </section>
   );
 }
-

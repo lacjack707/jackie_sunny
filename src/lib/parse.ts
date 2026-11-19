@@ -12,7 +12,7 @@ export interface FoundAmount {
 
 const AMOUNT_RE =
   /(-|−|\bminus\s+|\bnegative\s+)?\$?\s?(?<![\d.,])(\d[\d,]*(?:\.\d+)?)(?![\d.,]*\d)\s?(k\b|thousand\b)?(?!\s*(?:%|(?:percent|years?|yrs?|months?|mos?)\b))/gi;
-const DURATION_RE = /(\d+(?:\.\d+)?)\s*(years?|yrs?|months?|mos?)\b/gi;
+const DURATION_RE = /(\d+(?:\.\d+)?)\s*(?:[-–]\s*)?(years?|yrs?|months?|mos?)\b/gi;
 
 /** All dollar-like amounts in the text, e.g. "$1,200", "14000", "1.5k", "-500". Excludes durations and percentages. */
 export function findAmounts(text: string): FoundAmount[] {

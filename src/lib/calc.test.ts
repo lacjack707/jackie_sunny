@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bandForMonths, calculateScenario, homeSavingsAfterReserve, monthlyCashFlow, parseAmount } from './calc';
+import { bandForMonths, calculateScenario, homeSavingsAfterReserve, monthlyCashFlow, parseAmount, projectWealthComparison } from './calc';
 
 describe('calculateScenario', () => {
   it('matches the default confirmed scenario for Alex', () => {
@@ -80,5 +80,42 @@ describe('projectWithoutReturns', () => {
     expect(projectWithoutReturns({ start: 15000, monthly: 400, months: 60, target: null })).toMatchObject({ valid: true, contributions: 24000, total: 39000, gapAtEnd: null });
     expect(projectWithoutReturns({ start: 15000, monthly: 400, months: 60, target: 50000 })).toMatchObject({ gapAtEnd: 11000, requiredMonthly: 584 });
     expect(projectWithoutReturns({ start: -1, monthly: 0, months: 0, target: 0 }).valid).toBe(false);
+  });
+});
+
+describe('projectWealthComparison', () => {
+  it('returns monthly-compounded savings and fund series plus the annual GIC benchmark', () => {
+    const result = projectWealthComparison({ startingAmount: 1000, monthlyContribution: 100, years: 1 });
+    expect(result.valid).toBe(true);
+    expect(result.customRate).toBe(5);
+    expect(result.totalContributions).toBe(2200);
+    expect(result.yearlyBreakdown).toHaveLength(2);
+    expect(result.yearlyBreakdown[0]).toMatchObject({
+      year: 0,
+      contributions: 1000,
+      contributionsOnly: 1000,
+      savingsAccount: 1000,
+      gicBenchmark: 1000,
+      illustrativeFund: 1000,
+    });
+    expect(result.yearlyBreakdown[1]).toMatchObject({
+      year: 1,
+      contributions: 2200,
+      contributionsOnly: 2200,
+      gicBenchmark: 2236,
+    });
+    expect(result.yearlyBreakdown[1].savingsAccount).toBeGreaterThan(2200);
+    expect(result.yearlyBreakdown[1].illustrativeFund).toBeGreaterThan(result.yearlyBreakdown[1].savingsAccount);
+    expect(result.options.find((option) => option.id === 'gicBenchmark')).toMatchObject({
+      annualRate: 3.6,
+      endingBalance: 2236,
+      totalGrowth: 36,
+    });
+  });
+
+  it('selects the 3-year and 5-year GIC benchmark rates and rejects invalid horizons', () => {
+    expect(projectWealthComparison({ startingAmount: 0, monthlyContribution: 0, years: 3 }).options.find((o) => o.id === 'gicBenchmark')?.annualRate).toBe(3.95);
+    expect(projectWealthComparison({ startingAmount: 0, monthlyContribution: 0, years: 10 }).options.find((o) => o.id === 'gicBenchmark')?.annualRate).toBe(4.05);
+    expect(projectWealthComparison({ startingAmount: 0, monthlyContribution: 0, years: 0 }).valid).toBe(false);
   });
 });

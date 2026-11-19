@@ -58,6 +58,8 @@ function prompted(state: ConversationState): string {
   switch (state.memory.prompt) {
     case 'nudge':
       return `Sunny noticed your chequing balance stayed above ${money(state.signalConfig.threshold)} for ${state.signalConfig.observationDays} days and offered a conversation. That was only a reason to ask, not a judgment about the money.`;
+    case 'recommendation':
+      return `A pattern in your chequing balance prompted Sunny to show three products to explore.`;
     case 'checkin':
       return 'A check-in on the next step you chose earlier.';
     case 'self':
@@ -76,7 +78,7 @@ function unknowns(state: ConversationState, snap: AllocationSnapshot): string[] 
   if (!m.horizon) out.push('When you might need the money.');
   out.push('Your comfort with investment risk hasn’t been assessed.');
   out.push('Eligibility and suitability for any product haven’t been determined.');
-  if (m.goal?.type === 'first_home') out.push('Whether Tangerine currently offers an FHSA (unconfirmed).');
+  if (m.goal?.type === 'first_home') out.push('Tangerine does not currently offer an FHSA; TFSA and RSP alternatives were not selected.');
   return out;
 }
 

@@ -150,7 +150,9 @@ function stagePrompt(state: ConversationState, stage: Stage): Prompt {
         const actions = !m.nextStep || m.nextStepDone
           ? [
               ...(m.offeringsShown.includes('savings-account') ? [typed(state, 'Explore opening a Savings Account')] : []),
-              ...(m.offeringsShown.includes('moneyback-card') ? [typed(state, 'I want to apply for the Money-Back Credit Card')] : []),
+              ...(m.offeringsShown.includes('money-back-card') ? [typed(state, 'I want to apply for the Money-Back Credit Card')] : []),
+              ...(m.offeringsShown.includes('money-back-world') ? [typed(state, 'I want to apply for the Money-Back World Mastercard')] : []),
+              ...(m.offeringsShown.includes('rewards-world-elite') ? [typed(state, 'I want to apply for the Rewards World Elite Mastercard')] : []),
             ]
           : [];
         const next = !m.nextStep || m.nextStepDone ? nextStepReplies(state, false) : restingReplies(state);
@@ -204,7 +206,9 @@ function aiPrompt(state: ConversationState): Prompt {
   if (last?.card?.kind === 'offerings') {
     const actions = [
       ...(last.card.ids.includes('savings-account') ? [aiSay('I want to open a savings account')] : []),
-      ...(last.card.ids.includes('moneyback-card') ? [aiSay('I want to apply for the Money-Back Credit Card')] : []),
+      ...(last.card.ids.includes('money-back-card') ? [aiSay('I want to apply for the Money-Back Credit Card')] : []),
+      ...(last.card.ids.includes('money-back-world') ? [aiSay('I want to apply for the Money-Back World Mastercard')] : []),
+      ...(last.card.ids.includes('rewards-world-elite') ? [aiSay('I want to apply for the Rewards World Elite Mastercard')] : []),
     ];
     if (actions.length) return { replies: actions };
   }
@@ -220,7 +224,15 @@ function aiPrompt(state: ConversationState): Prompt {
     };
   }
   if (!state.messages.some((msg) => msg.role === 'customer') && state.origin !== 'nudge') {
-    return { replies: [aiSay('What can Tangerine help me with?'), aiSay('What’s the difference between saving and investing?'), aiSay('Is a TFSA an investment?'), aiSay('Help me think through a goal.')] };
+    return {
+      replies: [
+        aiSay('Compare 5-year savings & growth options', true),
+        aiSay('What can Tangerine help me with?'),
+        aiSay('What’s the difference between saving and investing?'),
+        aiSay('Is a TFSA an investment?'),
+        aiSay('Help me think through a goal.'),
+      ],
+    };
   }
   // Model suggestions are cleaned when received; top up with contextual fallbacks if too few remain.
   const latest = latestCustomerText(state);

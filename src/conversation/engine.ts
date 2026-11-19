@@ -9,11 +9,11 @@
 import { balancesOn, visibleHistory, type Relationship } from '../data/customers';
 import { TOPICS, type TopicId } from '../data/education';
 import { applyAllocations, summarizeAccount, type Allocation } from '../domain/allocations';
-import { DEFAULT_SIGNAL_CONFIG, evaluateElevatedBalance, type SignalConfig, type SignalResult } from '../domain/signal';
-import { projectWithoutReturns } from '../lib/calc';
+import { DEFAULT_SIGNAL_CONFIG, evaluateElevatedBalance, explainSignal, type SignalConfig, type SignalResult } from '../domain/signal';
+import { projectWealthComparison, projectWithoutReturns } from '../lib/calc';
 import { GOALS, HORIZONS, NEXT_STEPS, type ChatEffect } from '../shared/api';
 import { validateSourceIds } from '../shared/knowledge';
-import { eligiblePromotionIds, getOffering, namedOfferingIds, offeringPlan, offeringRecommendationReason, offeringUrl, OFFERINGS, validateOfferingIds } from '../shared/offerings';
+import { eligiblePromotionIds, getOffering, initialOfferingIds, isSignupProductId, namedOfferingIds, offeringPlan, offeringReasons, offeringUrl, OFFERINGS, validateOfferingIds } from '../shared/offerings';
 import { cleanSuggestions, latestCustomerText } from './navigation';
 import { GOAL_LABEL, HORIZON_LABEL, NEXT_STEP_LABEL, script } from './script';
 import type {
@@ -148,7 +148,8 @@ export type DashboardCard =
  */
 export function engagedWithNudge(state: ConversationState): boolean {
   const m = state.memory;
-  return m.prompt === 'nudge' && (m.allocations.length > 0 || m.goal !== null || m.nextStep !== null);
+  return (m.prompt === 'nudge' || m.prompt === 'recommendation') &&
+    (m.allocations.length > 0 || m.goal !== null || m.nextStep !== null);
 }
 
 export function dashboardCard(state: ConversationState): DashboardCard {
@@ -276,7 +277,7 @@ function featuredOffering(ids: string[], goal: Memory['goal'], horizon: Memory['
   const plan = offeringPlan(goal?.type ?? null, horizon);
   const featuredId = ids.includes(plan.featuredId) ? plan.featuredId : ids.find((id) => id !== 'advisors');
   return featuredId
-    ? { featuredId, featuredReason: offeringRecommendationReason(featuredId, goal?.type ?? null, horizon) }
+    ? { featuredId }
     : {};
 }
 
@@ -286,16 +287,28 @@ function showOfferings(d: Draft) {
   const plan = offeringPlan(m.goal?.type ?? null, m.horizon);
   const customerText = latestCustomerText(d) ?? '';
   const named = namedOfferingIds(customerText);
-  const ids = [...new Set([...plan.ids, ...named])];
+  const ids = initialOfferingIds(m.goal?.type ?? null, m.horizon, named, customerText);
+  const asksAboutCardFamily = /\b(?:credit cards?|mastercards?)\b/i.test(customerText) &&
+    !/\b(?:money.?back.{0,12}world|money.?back.{0,12}card|cash.?back|world elite|scene\+)\b/i.test(customerText);
+  const asksAboutNamedProducts = (named.length > 0 || asksAboutCardFamily) &&
+    (/\b(?:tell me|more about|information on|details on|which|recommend|suggest|offerings?)\b/i.test(customerText) ||
+      /\bwhat\b.{0,50}\b(?:does|do)\s+tangerine\b.{0,30}\boffer\b/i.test(customerText));
   const featuredId = named.find((id) => getOffering(id)?.availability !== 'unconfirmed') ?? plan.featuredId;
   const promotionIds = eligiblePromotionIds(ids, customerText);
   markShown(d, ids);
-  say(d, script.offeringsIntroFor(m.goal?.type ?? null, m.horizon, plan.emphasis), {
+  const intro = asksAboutNamedProducts
+    ? ids.length === 1
+      ? `You asked about ${getOffering(ids[0])?.name}; here are its key features and trade-offs to explore.`
+      : /\b(?:credit cards?|cards?)\b/i.test(customerText)
+        ? 'You asked about Tangerine credit cards. Here are the related card options to compare; their features and terms differ.'
+        : 'You asked about these Tangerine products. Here are their key features and trade-offs to compare.'
+    : script.offeringsIntroFor(m.goal?.type ?? null, m.horizon, plan.emphasis);
+  say(d, intro, {
     kind: 'offerings',
     ids,
     reason: script.offeringsReason(m.goal?.type ?? null, m.horizon),
-    featuredId,
-    featuredReason: offeringRecommendationReason(featuredId, m.goal?.type ?? null, m.horizon),
+    reasons: offeringReasons(ids, m.goal?.type ?? null, m.horizon),
+    featuredId: ids.includes(featuredId) ? featuredId : ids[0],
     ...(promotionIds.length ? { promotionIds } : {}),
   });
   say(d, script.nextStepAsk);
@@ -387,7 +400,7 @@ function suggestedQuestions(d: Draft): string[] {
   if (m.goal?.type === 'build_wealth') qs.push('Given my goals and timeline, how should I think about risk?');
   if (m.offeringsShown.includes('investment-funds')) qs.push('How do the Tangerine portfolios differ, and what are the total costs?');
   if (m.offeringsShown.includes('tfsa') || m.offeringsShown.includes('rsp')) qs.push('Would a TFSA or an RSP make more sense for my situation?');
-  if (m.goal?.type === 'first_home') qs.push('Does Tangerine offer an FHSA?');
+  if (m.goal?.type === 'first_home') qs.push('What should I compare between a Tangerine TFSA and RSP for a first-home goal?');
   if (!qs.length) qs.push('What should I consider before deciding what to do with this money?');
   return qs;
 }
@@ -424,6 +437,28 @@ function openConversation(d: Draft, origin: Origin) {
     say(d, script.nudgeOpen(d.profile.firstName, signal, d.signalConfig.observationDays), m.permission === 'granted' ? { kind: 'signal' } : undefined, { accountDetail: true });
     if (m.permission === 'granted') ask(d, 'purpose');
     else ask(d, 'permission');
+    return;
+  }
+  if (origin === 'recommendation') {
+    const plan = offeringPlan(m.goal?.type ?? null, m.horizon);
+    const ids = initialOfferingIds(m.goal?.type ?? null, m.horizon);
+    const reasons = offeringReasons(ids, m.goal?.type ?? null, m.horizon);
+    const signal = signalFor(d);
+    markShown(d, ids);
+    say(
+      d,
+      `${explainSignal(signal, d.signalConfig.observationDays)} This pattern doesn’t tell me what the money is for, so here are three general Tangerine products to compare. I’ve included why each might be worth exploring; you can choose any, all, or none.`,
+      {
+        kind: 'offerings',
+        ids,
+        reason: 'A starting set based on the account pattern; tell Sunny your goal for more tailored options.',
+        reasons,
+        featuredId: plan.featuredId,
+        promotionIds: eligiblePromotionIds(ids, ''),
+      },
+      { accountDetail: true },
+    );
+    d.stage = 'explore';
     return;
   }
   // Check-in: continue from the saved next step.
@@ -465,10 +500,16 @@ function applyAiEffects(d: Draft, effects: ChatEffect[]) {
         }
         break;
       case 'offeringsShown': {
-        const ids = validateOfferingIds(e.ids);
+        const submittedIds = validateOfferingIds(e.ids);
+        const customerText = latestCustomerText(d) ?? '';
+        const browseAll = e.browseAll === true && /\b(?:all|every|full list|browse|everything|other options|whole catalogue)\b/i.test(customerText);
+        const ids = browseAll
+          ? submittedIds
+          : initialOfferingIds(m.goal?.type ?? null, m.horizon, namedOfferingIds(customerText), customerText);
         if (ids.length) {
-          const eligiblePromotions = eligiblePromotionIds(ids, latestCustomerText(d) ?? '');
+          const eligiblePromotions = eligiblePromotionIds(ids, customerText);
           const promotionIds = (e.promotionIds ?? []).filter((id) => eligiblePromotions.includes(id));
+          const reasons = browseAll ? undefined : offeringReasons(ids, m.goal?.type ?? null, m.horizon);
           markShown(d, ids);
           say(
             d,
@@ -477,9 +518,10 @@ function applyAiEffects(d: Draft, effects: ChatEffect[]) {
               kind: 'offerings',
               ids,
               reason: (e.reason || script.offeringsReason(m.goal?.type ?? null, m.horizon)).slice(0, 200),
+              ...(reasons ? { reasons } : {}),
               ...(promotionIds.length ? { promotionIds } : {}),
               ...(e.featuredId && ids.includes(e.featuredId)
-                ? { featuredId: e.featuredId, featuredReason: e.featuredReason }
+                ? { featuredId: e.featuredId }
                 : ids.length > 0
                   ? featuredOffering(ids, m.goal, m.horizon)
                   : {}),
@@ -497,11 +539,27 @@ function applyAiEffects(d: Draft, effects: ChatEffect[]) {
         }
         break;
       case 'scenario': {
-        const input = { start: e.input.start, monthly: e.input.monthly, months: e.input.months, target: e.input.target ?? null };
-        if (projectWithoutReturns(input).valid) {
-          m.scenario = input;
-          say(d, '', { kind: 'scenario', input }, { local: true });
-        }
+        const projected = projectWealthComparison({
+          startingAmount: e.startingAmount,
+          monthlyContribution: e.monthlyContribution,
+          years: e.years,
+          customRate: e.customRate,
+        });
+        if (!projected.valid) break;
+        const compareTangerineOptions = e.compareTangerineOptions;
+        const comparison = {
+          years: projected.years,
+          startingAmount: projected.startingAmount,
+          monthlyContribution: projected.monthlyContribution,
+          customRate: projected.customRate,
+          compareTangerineOptions,
+          totalContributions: projected.totalContributions,
+          options: compareTangerineOptions
+            ? projected.options
+            : projected.options.filter((option) => option.id === 'contributionsOnly'),
+          yearlyBreakdown: projected.yearlyBreakdown,
+        };
+        say(d, '', { kind: 'wealthComparison', comparison }, { local: true });
         break;
       }
       case 'requestPermission':
@@ -518,7 +576,7 @@ function applyAiEffects(d: Draft, effects: ChatEffect[]) {
         break;
       }
       case 'signupPrepared':
-        if (getOffering(e.productId) && ['savings-account', 'moneyback-card'].includes(e.productId)) {
+        if (getOffering(e.productId) && isSignupProductId(e.productId)) {
           const eligiblePromotions = eligiblePromotionIds([e.productId], latestCustomerText(d) ?? '');
           const promotionIds = (e.promotionIds ?? []).filter((id) => eligiblePromotions.includes(id));
           say(d, '', { kind: 'signup', productId: e.productId, ...(promotionIds.length ? { promotionIds } : {}) }, { local: true });
@@ -756,7 +814,7 @@ export function reduce(state: ConversationState, turn: CustomerTurn): Conversati
     case 'startSignup': {
       const product = getOffering(event.productId);
       const url = product && offeringUrl(product);
-      if (!product || !url || !['savings-account', 'moneyback-card'].includes(event.productId)) {
+      if (!product || !url || !isSignupProductId(event.productId)) {
         say(d, script.signupUnavailable);
         break;
       }

@@ -176,3 +176,172 @@ export function projectWithoutReturns(input: ProjectionInput): ProjectionResult 
     requiredMonthly: gapToday === 0 ? null : Math.ceil(gapToday / input.months),
   };
 }
+
+export const MAX_WEALTH_YEARS = 40;
+export const DEFAULT_ILLUSTRATIVE_FUND_RATE = 5;
+
+export interface WealthComparisonInput {
+  startingAmount: number;
+  monthlyContribution: number;
+  years: number;
+  /** Annual rate in percentage points; e.g. 5 means 5%. */
+  customRate?: number;
+}
+
+export type WealthOptionId = 'contributionsOnly' | 'savingsAccount' | 'gicBenchmark' | 'illustrativeFund';
+
+export interface WealthOptionSummary {
+  id: WealthOptionId;
+  label: string;
+  annualRate: number;
+  rateDescription: string;
+  endingBalance: number;
+  totalGrowth: number;
+  tradeOff: string;
+}
+
+export interface WealthYearlyBreakdown {
+  year: number;
+  /** Cumulative starting amount plus monthly contributions through this year. */
+  contributions: number;
+  contributionsOnly: number;
+  savingsAccount: number;
+  gicBenchmark: number;
+  illustrativeFund: number;
+}
+
+export interface WealthComparisonResult {
+  valid: boolean;
+  errors: Partial<Record<keyof WealthComparisonInput, string>>;
+  startingAmount: number;
+  monthlyContribution: number;
+  years: number;
+  customRate: number;
+  totalContributions: number;
+  options: WealthOptionSummary[];
+  yearlyBreakdown: WealthYearlyBreakdown[];
+}
+
+/**
+ * Deterministic comparison model. Savings and illustrative fund balances
+ * compound monthly with end-of-month contributions. The GIC benchmark
+ * compounds annually; monthly contributions are pooled and added at each
+ * year-end, and horizons beyond five years assume renewal at the same rate.
+ * These assumptions are illustrations, not rate quotes or forecasts.
+ */
+export function projectWealthComparison(input: WealthComparisonInput): WealthComparisonResult {
+  const customRate = input.customRate ?? DEFAULT_ILLUSTRATIVE_FUND_RATE;
+  const errors: WealthComparisonResult['errors'] = {};
+  if (!isValidAmount(input.startingAmount)) errors.startingAmount = 'Enter a starting amount between $0 and $10,000,000.';
+  if (!isValidAmount(input.monthlyContribution)) errors.monthlyContribution = 'Enter a monthly contribution between $0 and $10,000,000.';
+  if (!Number.isInteger(input.years) || input.years < 1 || input.years > MAX_WEALTH_YEARS) {
+    errors.years = `Enter a whole number of years from 1 to ${MAX_WEALTH_YEARS}.`;
+  }
+  if (!Number.isFinite(customRate) || customRate < -99.99 || customRate > 100) {
+    errors.customRate = 'Enter an illustrative annual rate from -99.99% to 100%.';
+  }
+
+  const resultBase = {
+    startingAmount: input.startingAmount,
+    monthlyContribution: input.monthlyContribution,
+    years: input.years,
+    customRate,
+    totalContributions: 0,
+    options: [],
+    yearlyBreakdown: [],
+  };
+  if (Object.keys(errors).length > 0) return { valid: false, errors, ...resultBase };
+
+  const savingsRate = 0.3;
+  const gicRate = input.years === 1 ? 3.6 : input.years === 3 ? 3.95 : 4.05;
+  const monthlyRate = (annualRate: number) => annualRate / 100 / 12;
+  let contributionsOnly = input.startingAmount;
+  let savingsBalance = input.startingAmount;
+  let gicBalance = input.startingAmount;
+  let gicPendingContributions = 0;
+  let illustrativeBalance = input.startingAmount;
+  const yearlyBreakdown: WealthYearlyBreakdown[] = [{
+    year: 0,
+    contributions: roundCents(input.startingAmount),
+    contributionsOnly: roundCents(contributionsOnly),
+    savingsAccount: roundCents(savingsBalance),
+    gicBenchmark: roundCents(gicBalance),
+    illustrativeFund: roundCents(illustrativeBalance),
+  }];
+
+  for (let month = 1; month <= input.years * 12; month += 1) {
+    contributionsOnly += input.monthlyContribution;
+    savingsBalance = savingsBalance * (1 + monthlyRate(savingsRate)) + input.monthlyContribution;
+    illustrativeBalance = illustrativeBalance * (1 + monthlyRate(customRate)) + input.monthlyContribution;
+    gicPendingContributions += input.monthlyContribution;
+
+    if (month % 12 === 0) {
+      gicBalance = gicBalance * (1 + gicRate / 100) + gicPendingContributions;
+      gicPendingContributions = 0;
+      const year = month / 12;
+      yearlyBreakdown.push({
+        year,
+        contributions: roundCents(input.startingAmount + input.monthlyContribution * month),
+        contributionsOnly: roundCents(contributionsOnly),
+        savingsAccount: roundCents(savingsBalance),
+        gicBenchmark: roundCents(gicBalance),
+        illustrativeFund: roundCents(illustrativeBalance),
+      });
+    }
+  }
+
+  const totalContributions = roundCents(input.startingAmount + input.monthlyContribution * input.years * 12);
+  const ending = yearlyBreakdown.at(-1)!;
+  const option = (
+    id: WealthOptionId,
+    label: string,
+    annualRate: number,
+    rateDescription: string,
+    endingBalance: number,
+    tradeOff: string,
+  ): WealthOptionSummary => ({
+    id,
+    label,
+    annualRate,
+    rateDescription,
+    endingBalance,
+    totalGrowth: roundCents(endingBalance - totalContributions),
+    tradeOff,
+  });
+  const gicRateDescription = input.years === 1
+    ? '1-year benchmark; fixed only for an actual GIC term'
+    : input.years === 3
+      ? '3-year benchmark; fixed only for an actual GIC term'
+      : '5-year benchmark; fixed only for an actual GIC term';
+
+  return {
+    valid: true,
+    errors,
+    startingAmount: input.startingAmount,
+    monthlyContribution: input.monthlyContribution,
+    years: input.years,
+    customRate,
+    totalContributions,
+    yearlyBreakdown,
+    options: [
+      option('contributionsOnly', 'Contributions Only', 0, 'Baseline', ending.contributionsOnly, 'Baseline with no interest or investment returns.'),
+      option('savingsAccount', 'Tangerine Savings Account / TFSA Savings', savingsRate, 'Variable posted base rate; can change', ending.savingsAccount, 'Accessible anytime; assumes the 0.30% base rate stays unchanged.'),
+      option(
+        'gicBenchmark',
+        'Tangerine GIC Benchmark',
+        gicRate,
+        `${gicRate.toFixed(2)}% ${gicRateDescription}`,
+        ending.gicBenchmark,
+        `Fixed-rate benchmark, locked until maturity; contributions are pooled at year-end${input.years > 5 ? ` and renewal beyond five years assumes the same ${gicRate.toFixed(2)}% rate` : ''}.`,
+      ),
+      option(
+        'illustrativeFund',
+        'Illustrative Investment Fund / Custom Rate',
+        customRate,
+        'Illustrative annual assumption',
+        ending.illustrativeFund,
+        'Hypothetical and not guaranteed; fund values fluctuate. Combined 0.65%–0.95% management/admin fees vary by portfolio and are not deducted.',
+      ),
+    ],
+  };
+}

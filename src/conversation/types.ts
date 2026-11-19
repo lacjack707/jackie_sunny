@@ -2,7 +2,7 @@ import type { Relationship } from '../data/customers';
 import type { TopicId } from '../data/education';
 import type { Allocation } from '../domain/allocations';
 import type { SignalConfig } from '../domain/signal';
-import type { AiErrorCode, ChatResponse } from '../shared/api';
+import type { AiErrorCode, ChatResponse, ScenarioDTO } from '../shared/api';
 import type { GoalType, SignupProductId } from '../shared/offerings';
 
 export type View = 'dashboard' | 'chat' | 'handoff' | 'summary';
@@ -11,7 +11,7 @@ export type View = 'dashboard' | 'chat' | 'handoff' | 'summary';
 export type EngineMode = 'ai' | 'scripted';
 
 /** What started a conversation. */
-export type Origin = 'nudge' | 'self' | 'checkin';
+export type Origin = 'nudge' | 'recommendation' | 'self' | 'checkin';
 
 export type Horizon = 'under_1_year' | '1_to_5_years' | 'over_5_years' | 'not_sure';
 
@@ -110,9 +110,10 @@ export type MessageCard =
   | { kind: 'education'; topic: TopicId }
   | { kind: 'signal' }
   | { kind: 'allocations'; snapshot: AllocationSnapshot }
-  | { kind: 'offerings'; ids: string[]; reason: string; featuredId?: string; featuredReason?: string; promotionIds?: string[] }
+  | { kind: 'offerings'; ids: string[]; reason: string; reasons?: Record<string, string>; featuredId?: string; promotionIds?: string[] }
   | { kind: 'signup'; productId: SignupProductId; promotionIds?: string[] }
   | { kind: 'scenario'; input: ScenarioFacts; hypothetical?: boolean }
+  | { kind: 'wealthComparison'; comparison: ScenarioDTO }
   | { kind: 'factsUpdated'; changes: string[] }
   | { kind: 'action'; action: 'summary' | 'handoff' }
   | { kind: 'error'; code: AiErrorCode; message: string };

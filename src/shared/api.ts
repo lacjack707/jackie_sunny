@@ -3,6 +3,7 @@
  * shared by the server tools and the client reducer.
  */
 import { MAX_AMOUNT } from '../lib/calc.ts';
+import type { WealthComparisonResult } from '../lib/calc.ts';
 import type { SignupProductId } from './offerings.ts';
 
 export const LIMITS = {
@@ -66,7 +67,7 @@ export interface AccountContext {
 
 /** Customer-confirmed conversation context (safe to send without permission: the customer said it). */
 export interface ConversationContext {
-  origin: 'nudge' | 'self' | 'checkin' | null;
+  origin: 'nudge' | 'recommendation' | 'self' | 'checkin' | null;
   allocations: AllocationDTO[];
   goal: { type: GoalKey; detail: string | null } | null;
   horizon: HorizonKey | null;
@@ -79,12 +80,9 @@ export interface ConversationContext {
   previousNextStep: NextStepKey | null;
 }
 
-export interface ScenarioDTO {
-  start: number;
-  monthly: number;
-  months: number;
-  target: number | null;
-}
+export type ScenarioDTO = Omit<WealthComparisonResult, 'valid' | 'errors'> & {
+  compareTangerineOptions: boolean;
+};
 
 export interface ChatRequest {
   firstName: string;
@@ -99,10 +97,10 @@ export type ChatEffect =
   | { type: 'allocationsUpdated'; allocations: AllocationDTO[] }
   | { type: 'goalSet'; goal: { type: GoalKey; detail: string | null } }
   | { type: 'horizonSet'; horizon: HorizonKey }
-  | { type: 'offeringsShown'; ids: string[]; reason: string; featuredId?: string; featuredReason?: string; promotionIds?: string[] }
+  | { type: 'offeringsShown'; ids: string[]; reason: string; reasons?: Record<string, string>; featuredId?: string; promotionIds?: string[]; browseAll?: boolean }
   | { type: 'signupPrepared'; productId: SignupProductId; promotionIds?: string[] }
   | { type: 'nextStepSet'; step: NextStepKey }
-  | { type: 'scenario'; input: ScenarioDTO }
+  | ({ type: 'scenario' } & ScenarioDTO)
   | { type: 'requestPermission'; reason: string }
   | { type: 'summaryReady' }
   | { type: 'handoffReady'; questions: string[] };

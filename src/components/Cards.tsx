@@ -1,14 +1,22 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { TOPICS, type TopicId } from '../data/education';
 import { PURPOSE_LABEL } from '../domain/allocations';
 import type { DailyBalance } from '../domain/history';
 import type { SignalResult } from '../domain/signal';
-import { projectWithoutReturns } from '../lib/calc';
+import {
+  MAX_AMOUNT,
+  MAX_WEALTH_YEARS,
+  projectWealthComparison,
+  projectWithoutReturns,
+  type WealthOptionId,
+  type WealthYearlyBreakdown,
+} from '../lib/calc';
 import { money } from '../lib/format';
 import { offerIsCurrentAsOf } from '../shared/catalogue';
 import { getEntry, type KnowledgeEntry } from '../shared/knowledge';
-import { getCatalogueOffer, getOffering, offeringUrl, signupChecklist, type SignupProductId } from '../shared/offerings';
+import { getCatalogueOffer, getOffering, offeringUrl, signupChecklist, SUPPORT_LINKS, type SignupProductId } from '../shared/offerings';
 import type { AllocationSnapshot, ScenarioFacts } from '../conversation/types';
+import type { ScenarioDTO } from '../shared/api';
 
 /** Key points for a scripted educational answer (the answer itself is the message text). */
 export function EducationCard({ topic }: { topic: TopicId }) {
@@ -40,7 +48,7 @@ export function SourceList({ ids }: { ids: string[] }) {
         {entries.map((e) => (
           <li key={e.id}>
             <span className={`source-kind source-${e.kind}`}>{e.kind === 'tangerine' ? 'Tangerine' : 'General'}</span>
-            <a href={e.url} target="_blank" rel="noreferrer">
+            <a href={e.url} target="_blank" rel="noopener noreferrer">
               {e.publisher}: {e.pageTitle}
             </a>
             <span className="source-date">Reviewed {formatDate(e.reviewed)}</span>
@@ -60,10 +68,31 @@ export function FactsUpdatedCard({ changes }: { changes: string[] }) {
   );
 }
 
+export function SupportChannelsCard() {
+  return (
+    <div className="card support-channels-card" aria-label="Tangerine support options">
+      <p className="card-kicker">Connect with Tangerine</p>
+      <p>Choose a direct support option. These links open Tangerine; nothing is sent or booked by Sunny.</p>
+      <div className="support-channel-links">
+        {SUPPORT_LINKS.map((link) => (
+          <a key={link.sourceId} className="btn btn-secondary" href={link.url} target="_blank" rel="noopener noreferrer">
+            {link.label}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function OfferPromotion({ promotionId, offeringId }: { promotionId: string; offeringId: string }) {
   const offer = getCatalogueOffer(promotionId);
   const currentDay = new Date().toISOString().slice(0, 10);
-  if (!offer || !offer.relatedProductIds.includes(offeringId) || !offerIsCurrentAsOf(offer, currentDay)) return null;
+  const catalogueId = offeringId === 'money-back-card'
+    ? 'moneyback-card'
+    : offeringId === 'money-back-world'
+      ? 'moneyback-world-card'
+      : offeringId;
+  if (!offer || !offer.relatedProductIds.includes(catalogueId) || !offerIsCurrentAsOf(offer, currentDay)) return null;
   return (
     <div className="offering-promo">
       <p className="offering-promo-label">An offer to review</p>
@@ -73,7 +102,7 @@ function OfferPromotion({ promotionId, offeringId }: { promotionId: string; offe
       <ul>
         {[...offer.eligibility, ...offer.conditions].map((condition) => <li key={condition}>{condition}</li>)}
       </ul>
-      <a href={offer.sourceUrl} target="_blank" rel="noreferrer">Review Tangerine’s offer terms</a>
+      <a href={offer.sourceUrl} target="_blank" rel="noopener noreferrer">Review Tangerine’s offer terms</a>
     </div>
   );
 }
@@ -174,7 +203,7 @@ export function AllocationCard({ snapshot }: { snapshot: AllocationSnapshot }) {
   );
 }
 
-export function OfferingsCard({ ids, reason, featuredId, featuredReason, promotionIds = [], onExplore }: { ids: string[]; reason: string; featuredId?: string; featuredReason?: string; promotionIds?: string[]; onExplore?: (id: string) => void }) {
+export function OfferingsCard({ ids, reason, reasons, featuredId, promotionIds = [], onExplore }: { ids: string[]; reason: string; reasons?: Record<string, string>; featuredId?: string; promotionIds?: string[]; onExplore?: (id: string) => void }) {
   const list = ids.map(getOffering).filter((o): o is NonNullable<typeof o> => Boolean(o));
   if (!list.length) return null;
   const featured = list.find((o) => o.id === featuredId);
@@ -182,13 +211,7 @@ export function OfferingsCard({ ids, reason, featuredId, featuredReason, promoti
     <div className="card offerings-card" aria-label="Tangerine offerings to learn about">
       <p className="card-kicker">Tangerine products to explore</p>
       <p className="offerings-reason">{reason}</p>
-      {featured && featuredReason && (
-        <div className="offering-featured">
-          <p className="offering-featured-label">A specific product to explore first</p>
-          <strong>{featured.name}</strong>
-          <p>{featuredReason}</p>
-        </div>
-      )}
+      {featured && <p className="offering-featured-label">A specific product to explore first: <strong>{featured.name}</strong></p>}
       <div className="offerings">
         {list.map((o) => {
           const url = offeringUrl(o);
@@ -200,6 +223,7 @@ export function OfferingsCard({ ids, reason, featuredId, featuredReason, promoti
                 {o.availability === 'unconfirmed' && <span className="tag">Availability unconfirmed</span>}
                 <strong>{o.name}</strong>
                 <span>{o.summary}</span>
+                {reasons?.[o.id] && <span><strong>Why it’s included:</strong> {reasons[o.id]}</span>}
               </summary>
               <div className="offering-body">
                 <p className="offering-h">Features</p>
@@ -239,14 +263,14 @@ export function OfferingsCard({ ids, reason, featuredId, featuredReason, promoti
                 )}
                 <p className="offering-links">
                   {url && (
-                    <a href={url} target="_blank" rel="noreferrer" onClick={() => onExplore?.(o.id)}>
+                    <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => onExplore?.(o.id)}>
                       {o.availability === 'unconfirmed' ? 'Tangerine information' : 'Official product page'}
                     </a>
                   )}
                   {o.sources.slice(1).map((id) => {
                     const source = getEntry(id);
                     return source?.kind === 'tangerine' ? (
-                      <span key={id}> · <a href={source.url} target="_blank" rel="noreferrer">{source.pageTitle}</a></span>
+                      <span key={id}> · <a href={source.url} target="_blank" rel="noopener noreferrer">{source.pageTitle}</a></span>
                     ) : null;
                   })}
                   {reviewed && <span className="source-date"> · Verified {formatDate(reviewed)}</span>}
@@ -256,7 +280,7 @@ export function OfferingsCard({ ids, reason, featuredId, featuredReason, promoti
           );
         })}
       </div>
-      <p className="card-note">Shown based on what you shared. These are optional products to explore, not a personal suitability or investment assessment. Choosing none is fine.</p>
+      <p className="card-note">These are options to explore, not decisions. Review the details before acting; choosing none is fine.</p>
     </div>
   );
 }
@@ -273,11 +297,11 @@ export function SignupCard({ productId, promotionIds = [] }: { productId: Signup
       <ul>
         {signupChecklist(productId).map((item) => <li key={item}>{item}</li>)}
       </ul>
-      <a className="btn btn-primary" href={url} target="_blank" rel="noreferrer">
-        Continue to Tangerine’s official page
+      <a className="btn btn-primary" href={url} target="_blank" rel="noopener noreferrer">
+        Start Application on Tangerine.ca
       </a>
       <p className="card-note">
-        The link opens Tangerine’s product page. Any application is completed directly with Tangerine; Sunny does not collect your application details, check eligibility, or guarantee approval.
+        The link opens Tangerine’s product page. Any application is completed directly with Tangerine; Sunny never collects your SIN, personal income details, login credentials or application information, and cannot check eligibility or guarantee approval.
       </p>
     </div>
   );
@@ -315,6 +339,198 @@ export function ScenarioCard({ input, hypothetical = false, outdated = false }: 
         )}
       </dl>
       <p className="card-note">Simple arithmetic with your numbers. Excludes interest, investment returns, fees and taxes; not a forecast.</p>
+    </div>
+  );
+}
+
+const WEALTH_SERIES: { id: WealthOptionId; label: string; color: string; dashed?: boolean }[] = [
+  { id: 'contributionsOnly', label: 'Contributions Only', color: '#596579', dashed: true },
+  { id: 'savingsAccount', label: 'Savings Account / TFSA Savings', color: '#087e8b' },
+  { id: 'gicBenchmark', label: 'GIC Benchmark', color: '#d96616' },
+  { id: 'illustrativeFund', label: 'Illustrative Fund / Custom Rate', color: '#7652a2' },
+];
+
+function WealthGrowthGraph({ years, yearlyBreakdown, visibleOptions }: {
+  years: number;
+  yearlyBreakdown: WealthYearlyBreakdown[];
+  visibleOptions: WealthOptionId[];
+}) {
+  const width = 800;
+  const height = 300;
+  const margin = { top: 20, right: 24, bottom: 42, left: 76 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const values = yearlyBreakdown.flatMap((point) => visibleOptions.map((optionId) => point[optionId]));
+  const maxValue = Math.max(1, ...values);
+  const x = (year: number) => margin.left + (year / years) * plotWidth;
+  const y = (value: number) => margin.top + plotHeight - (value / maxValue) * plotHeight;
+  const series = WEALTH_SERIES.filter((item) => visibleOptions.includes(item.id));
+  const yearLabels = yearlyBreakdown.filter((point) => point.year === 0 || point.year === years || point.year % 5 === 0);
+
+  return (
+    <div className="wealth-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Projected balances from year 0 to year ${years}`}>
+        <title>Illustrative year-by-year balance comparison</title>
+        {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+          const value = maxValue * fraction;
+          const lineY = y(value);
+          return (
+            <g key={fraction} className="wealth-gridline">
+              <line x1={margin.left} x2={width - margin.right} y1={lineY} y2={lineY} />
+              <text x={margin.left - 10} y={lineY + 4} textAnchor="end">{money(value)}</text>
+            </g>
+          );
+        })}
+        <line className="wealth-axis" x1={margin.left} x2={width - margin.right} y1={height - margin.bottom} y2={height - margin.bottom} />
+        {yearLabels.map((point) => (
+          <text key={point.year} className="wealth-year-label" x={x(point.year)} y={height - 14} textAnchor="middle">
+            {point.year}
+          </text>
+        ))}
+        {series.map((item) => (
+          <g key={item.id} className="wealth-series">
+            <polyline
+              points={yearlyBreakdown.map((point) => `${x(point.year)},${y(point[item.id])}`).join(' ')}
+              fill="none"
+              stroke={item.color}
+              strokeWidth="3"
+              strokeDasharray={item.dashed ? '7 5' : undefined}
+            />
+            {yearlyBreakdown.map((point) => (
+              <circle key={point.year} cx={x(point.year)} cy={y(point[item.id])} r="4" fill={item.color}>
+                <title>{`${item.label}, year ${point.year}: ${money(point[item.id])}`}</title>
+              </circle>
+            ))}
+          </g>
+        ))}
+      </svg>
+      <div className="wealth-legend" aria-label="Chart legend">
+        {series.map((item) => (
+          <span key={item.id}>
+            <i aria-hidden="true" style={{ backgroundColor: item.color }} /> {item.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function WealthComparisonCard({ comparison }: { comparison: ScenarioDTO }) {
+  const id = useId();
+  const [values, setValues] = useState({
+    startingAmount: String(comparison.startingAmount),
+    monthlyContribution: String(comparison.monthlyContribution),
+    years: String(comparison.years),
+    customRate: String(comparison.customRate),
+  });
+  const numeric = (value: string) => value.trim() ? Number(value) : Number.NaN;
+  const projected = projectWealthComparison({
+    startingAmount: numeric(values.startingAmount),
+    monthlyContribution: numeric(values.monthlyContribution),
+    years: numeric(values.years),
+    customRate: numeric(values.customRate),
+  });
+  const visibleOptions = comparison.compareTangerineOptions
+    ? projected.options.map((option) => option.id)
+    : ['contributionsOnly' as const];
+  const update = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
+  const controls = [
+    { key: 'startingAmount' as const, label: 'Starting Amount ($)', min: 0, max: MAX_AMOUNT, step: 0.01, rangeMax: 1_000_000, rangeStep: 1_000, prefix: '$' },
+    { key: 'monthlyContribution' as const, label: 'Monthly Contribution ($)', min: 0, max: MAX_AMOUNT, step: 0.01, rangeMax: 20_000, rangeStep: 100, prefix: '$' },
+    { key: 'years' as const, label: 'Time Horizon (Years)', min: 1, max: MAX_WEALTH_YEARS, step: 1, rangeMax: MAX_WEALTH_YEARS, rangeStep: 1, prefix: '' },
+    { key: 'customRate' as const, label: 'Custom Rate (%)', min: -99.99, max: 100, step: 0.01, rangeMax: 20, rangeStep: 0.25, prefix: '' },
+  ];
+
+  return (
+    <div className="card wealth-comparison-card" aria-label="Wealth and savings growth calculator">
+      <div className="card-head">
+        <p className="card-kicker">Wealth &amp; Savings Growth Calculator</p>
+        <span className="tag">Illustrative, not a forecast</span>
+      </div>
+      <p className="card-note">
+        Adjust any value to update the chart. Savings uses a variable 0.30% base-rate assumption; GIC rates are benchmark assumptions, not a live quote; the fund rate is hypothetical and not guaranteed.
+      </p>
+      <div className="wealth-controls">
+        {controls.map((control) => {
+          const number = numeric(values[control.key]);
+          const rangeValue = Number.isFinite(number) ? Math.min(control.rangeMax, Math.max(control.min, number)) : control.min;
+          const fieldId = `${id}-${control.key}`;
+          return (
+            <div className="wealth-control" key={control.key}>
+              <label htmlFor={fieldId}>{control.label}</label>
+              <div className="wealth-number-input">
+                {control.prefix && <span aria-hidden="true">{control.prefix}</span>}
+                <input
+                  id={fieldId}
+                  type="number"
+                  min={control.min}
+                  max={control.max}
+                  step={control.step}
+                  value={values[control.key]}
+                  onChange={(event) => update(control.key, event.target.value)}
+                />
+              </div>
+              <input
+                type="range"
+                min={control.min}
+                max={control.rangeMax}
+                step={control.rangeStep}
+                value={rangeValue}
+                aria-label={`Adjust ${control.label.toLowerCase()}`}
+                onChange={(event) => update(control.key, event.target.value)}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {projected.valid ? (
+        <>
+          <WealthGrowthGraph
+            years={projected.years}
+            yearlyBreakdown={projected.yearlyBreakdown}
+            visibleOptions={visibleOptions}
+          />
+          <div className="wealth-table-wrap">
+            <table className="wealth-table">
+              <caption>Comparison at year {projected.years}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Option</th>
+                  <th scope="col">Assumed annual rate</th>
+                  <th scope="col">Ending Balance</th>
+                  <th scope="col">Total Growth/Interest</th>
+                  <th scope="col">Key Trade-Off</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projected.options.filter((option) => visibleOptions.includes(option.id)).map((option) => (
+                  <tr key={option.id}>
+                    <th scope="row">{option.label}</th>
+                    <td>{option.annualRate.toFixed(2)}% · {option.rateDescription}</td>
+                    <td>{money(option.endingBalance)}</td>
+                    <td>{money(option.totalGrowth)}</td>
+                    <td>{option.tradeOff}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <p className="field-error" role="alert">{Object.values(projected.errors)[0]}</p>
+      )}
+      <p className="card-note">
+        The GIC model pools monthly contributions at each year-end; renewals beyond five years assume the same benchmark rate. Fund fees of 0.65%–0.95% vary by portfolio and are not deducted. Check Tangerine’s current rates and terms before making decisions.
+      </p>
+      <p className="offering-links">
+        Official details:{' '}
+        <a href={getEntry('tng-savings-account')?.url} target="_blank" rel="noopener noreferrer">Savings Account</a>
+        {' · '}
+        <a href="https://www.tangerine.ca/en/rates/gic-rates" target="_blank" rel="noopener noreferrer">GIC rates</a>
+        {' · '}
+        <a href={getEntry('tng-investment-funds')?.url} target="_blank" rel="noopener noreferrer">Investment Funds</a>
+      </p>
     </div>
   );
 }

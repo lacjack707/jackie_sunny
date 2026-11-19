@@ -3,6 +3,7 @@ import { autoNote, buildSummary } from '../conversation/summary';
 import type { ConversationState, SunnyEvent } from '../conversation/types';
 import { PURPOSE_LABEL } from '../domain/allocations';
 import { money } from '../lib/format';
+import { SupportChannelsCard } from './Cards';
 
 interface Props {
   state: ConversationState;
@@ -33,6 +34,8 @@ export function HandoffPreview({ state, dispatch }: Props) {
           anything before it’s used.
         </p>
       </div>
+
+      <SupportChannelsCard />
 
       <div className="page-grid">
         <section className="panel-card" aria-labelledby="handoff-facts">

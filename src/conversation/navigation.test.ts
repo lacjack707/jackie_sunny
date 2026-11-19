@@ -120,8 +120,7 @@ describe('product exploration follows goal and timeline', () => {
   it('the full catalogue stays one explicit action away', () => {
     const s = run(click(alexToHorizon(), 'Within a year'), { type: 'browseOfferings' });
     expect(offeringsCard(s).ids).toHaveLength(OFFERINGS.length);
-    expect(offeringsCard(s).ids).toContain('moneyback-card');
-    expect(offeringsCard(s).ids).toContain('fhsa-status');
+    expect(offeringsCard(s).ids).toContain('money-back-card');
   });
 });
 

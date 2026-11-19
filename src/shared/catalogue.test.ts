@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CATALOGUE_REFERENCE_SOURCES, offerIsCurrentAsOf, TANGERINE_CATALOGUE, TANGERINE_OFFERS } from './catalogue';
 import { getEntry, retrieve } from './knowledge';
-import { eligiblePromotionIds, namedOfferingIds, OFFERINGS, offeringsFor, validateOfferingIds } from './offerings';
+import { eligiblePromotionIds, initialOfferingIds, namedOfferingIds, OFFERINGS, offeringPlan, offeringReasons, offeringsFor, validateOfferingIds } from './offerings';
 
 describe('Tangerine product catalogue', () => {
   it('covers the major personal product families with unique ids and official sources', () => {
@@ -29,18 +29,26 @@ describe('Tangerine product catalogue', () => {
     expect(CATALOGUE_REFERENCE_SOURCES.every((source) => source.url.startsWith('https://www.tangerine.ca/'))).toBe(true);
   });
 
-  it('marks FHSA availability as unconfirmed and preserves the official information source', () => {
+  it('states that Tangerine does not currently offer an FHSA', () => {
     const fhsa = TANGERINE_CATALOGUE.find((product) => product.id === 'fhsa-status');
-    expect(fhsa?.availability).toBe('unconfirmed');
+    expect(fhsa?.availability).toBe('unavailable');
     expect(fhsa?.sourceUrl).toBe('https://www.tangerine.ca/en/ai-information');
-    expect(fhsa?.relatedSourceIds).toContain('gov-fhsa-overview');
-    expect(fhsa?.summary).toMatch(/no dedicated FHSA product page or terms were found/i);
+    expect(fhsa?.summary).toMatch(/does not currently offer/i);
+    expect(getEntry('tng-fhsa-status')?.content).toMatch(/Tangerine does not currently offer.*FHSA/);
+    expect(getEntry('tng-fhsa-status')?.content).toMatch(/Tangerine.*TFSA or RSP/i);
+    expect(getEntry('tng-first-home-article')?.content).toMatch(/Home Buyers’ Plan/);
   });
 
   it('makes every verified catalogue product browsable without broadening the recommendation shortlist', () => {
     const browseIds = validateOfferingIds(OFFERINGS.map((offering) => offering.id));
-    for (const product of TANGERINE_CATALOGUE) {
-      const offeringId = product.id === 'savings' ? 'savings-account' : product.id;
+    for (const product of TANGERINE_CATALOGUE.filter((entry) => entry.id !== 'fhsa-status')) {
+      const offeringId = product.id === 'savings'
+        ? 'savings-account'
+        : product.id === 'moneyback-card'
+          ? 'money-back-card'
+          : product.id === 'moneyback-world-card'
+            ? 'money-back-world'
+            : product.id;
       expect(browseIds).toContain(offeringId);
       const offering = OFFERINGS.find((item) => item.id === offeringId)!;
       expect(offering.rates?.length).toBeGreaterThan(0);
@@ -48,8 +56,10 @@ describe('Tangerine product catalogue', () => {
       expect(offering.sources[0]).toBe(product.sourceId);
     }
     expect(browseIds.length).toBe(OFFERINGS.length);
-    expect(OFFERINGS.find((offering) => offering.id === 'fhsa-status')?.availability).toBe('unconfirmed');
-    expect(OFFERINGS.find((offering) => offering.id === 'fhsa-status')?.sources.every((id) => getEntry(id)?.kind === 'tangerine')).toBe(true);
+    expect(OFFERINGS.find((offering) => offering.id === 'fhsa-status')).toBeUndefined();
+    expect(OFFERINGS.find((offering) => offering.id === 'money-back-card')?.sources[0]).toBe('tng-money-back-card');
+    expect(OFFERINGS.find((offering) => offering.id === 'money-back-world')?.sources[0]).toBe('tng-money-back-world');
+    expect(OFFERINGS.find((offering) => offering.id === 'rewards-world-elite')?.sources[0]).toBe('tng-rewards-world-elite');
     expect(offeringsFor('accessible_interest').map((offering) => offering.id)).not.toContain('mortgage');
     expect(namedOfferingIds('Tell me about Tangerine mortgages')).toContain('mortgage');
   });
@@ -61,13 +71,52 @@ describe('Tangerine product catalogue', () => {
       '2026-11-09',
     )).toEqual(['chequing-payroll-bonus']);
     expect(eligiblePromotionIds(
-      ['moneyback-card'],
+      ['money-back-card'],
       'I have never had a Tangerine credit card.',
       '2026-11-09',
     )).toEqual(['moneyback-ten-percent']);
     expect(eligiblePromotionIds(['chequing'], 'I want to switch my payroll.', '2026-11-09')).toEqual([]);
-    expect(eligiblePromotionIds(['moneyback-card'], 'I want a Tangerine credit card.', '2026-11-09')).toEqual([]);
+    expect(eligiblePromotionIds(['money-back-card'], 'I want a Tangerine credit card.', '2026-11-09')).toEqual([]);
     expect(eligiblePromotionIds(['chequing'], 'I am new to Tangerine and want to move my payroll.', '2026-11-17')).toEqual([]);
+  });
+
+  it('returns exactly three initial products with a separate rationale for every product', () => {
+    const cases = [
+      [null, null],
+      ['build_wealth', null],
+      ['accessible_interest', 'under_1_year'],
+      ['build_wealth', '1_to_5_years'],
+      ['build_wealth', 'over_5_years'],
+      ['build_wealth', 'not_sure'],
+      ['first_home', 'over_5_years'],
+    ] as const;
+    for (const [goal, horizon] of cases) {
+      const { ids } = offeringPlan(goal, horizon);
+      expect(ids).toHaveLength(3);
+      expect(initialOfferingIds(goal, horizon)).toHaveLength(3);
+      expect(Object.keys(offeringReasons(ids, goal, horizon))).toHaveLength(3);
+    }
+    expect(initialOfferingIds(null, null, ['mortgage'])).toEqual(['mortgage']);
+  });
+
+  it('keeps targeted product requests focused and groups generic credit-card requests by family', () => {
+    const creditCards = 'What Tangerine credit card offerings do you have?';
+    expect(initialOfferingIds(null, null, namedOfferingIds(creditCards), creditCards)).toEqual([
+      'money-back-card',
+      'money-back-world',
+      'rewards-world-elite',
+    ]);
+
+    const moneyBack = 'Tell me about the Tangerine Money-Back Credit Card.';
+    expect(initialOfferingIds(null, null, namedOfferingIds(moneyBack), moneyBack)).toEqual(['money-back-card']);
+    expect(initialOfferingIds(null, null)).toHaveLength(3);
+  });
+
+  it('uses the optional account signals to shape exploratory plans', () => {
+    expect(offeringPlan(null, 'not_sure', { chequingSurplusSignal: true }).ids).toEqual(['savings-account', 'tfsa']);
+    expect(offeringPlan(null, '1_to_5_years', { hasUnassignedCash: true }).ids).toEqual(['gic', 'tfsa']);
+    expect(offeringPlan(null, 'over_5_years', { hasUnassignedCash: true }).ids).toEqual(['tfsa', 'rsp', 'investment-funds']);
+    expect(offeringReasons(['money-back-card'], null, null)['money-back-card']).toMatch(/third 2% category/);
   });
 
   it('keeps current-rate values live and exposes catalogue facts to Sunny retrieval', () => {

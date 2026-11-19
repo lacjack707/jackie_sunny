@@ -7,7 +7,12 @@
  * history, preferences or completed actions: everything it records must come
  * from the customer's own words or from code.
  */
-import { projectWithoutReturns } from '../src/lib/calc.ts';
+import {
+  DEFAULT_ILLUSTRATIVE_FUND_RATE,
+  isValidAmount,
+  MAX_WEALTH_YEARS,
+  projectWealthComparison,
+} from '../src/lib/calc.ts';
 import { findAmounts, findDurations, normalizeText } from '../src/lib/parse.ts';
 import {
   checkAmount,
@@ -24,7 +29,7 @@ import {
   type NextStepKey,
   type PurposeKey,
 } from '../src/shared/api.ts';
-import { eligiblePromotionIds, namedOfferingIds, OFFERINGS, offeringPlan, offeringRecommendationReason, validateOfferingIds } from '../src/shared/offerings.ts';
+import { eligiblePromotionIds, initialOfferingIds, namedOfferingIds, OFFERINGS, offeringPlan, offeringReasons, validateOfferingIds, type OfferingSignals } from '../src/shared/offerings.ts';
 
 export interface ToolContext {
   req: ChatRequest;
@@ -90,7 +95,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         offering_ids: { type: 'array', items: { type: 'string' } },
-        reason: { type: 'string', description: 'Why these are relevant to explore, in terms of what the customer said (not suitability).' },
+        reason: { type: 'string', description: 'Connect the options to the customer’s stated goal or timeframe without judging whether a product is right for them.' },
       },
       required: ['offering_ids', 'reason'],
     },
@@ -107,16 +112,18 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'calculate_scenario',
     description:
-      'Illustrative arithmetic: starting amount + equal monthly amounts, optional target. No interest or returns. Values must come from the customer or the amount not yet assigned.',
+      'Build an interactive wealth and savings growth comparison. Use customer-stated amounts or, with permission, the not-yet-assigned chequing balance. Defaults to a context-aware horizon and compares Tangerine options unless the customer requests contribution-only math.',
     parameters: {
       type: 'object',
       properties: {
-        starting_amount: { type: 'number' },
-        monthly: { type: 'number' },
-        months: { type: 'integer' },
-        target: { type: 'number' },
+        starting_amount: { type: 'number', description: 'Optional customer-stated starting lump sum; if absent, use permissioned not-yet-assigned chequing cash or $0.' },
+        monthly: { type: 'number', description: 'Optional customer-stated monthly contribution; defaults to $0 if not specified.' },
+        years: { type: 'integer', description: `Optional customer-stated whole-year horizon from 1 to ${MAX_WEALTH_YEARS}. If omitted, resolve from the confirmed timeframe (1, 5 or 10 years).` },
+        months: { type: 'integer', description: 'Legacy duration input. Use only if customer-stated and an exact whole number of years.' },
+        annual_rate: { type: 'number', description: `Optional customer-stated illustrative annual rate in percent; defaults to ${DEFAULT_ILLUSTRATIVE_FUND_RATE}%. Never imply the rate is guaranteed.` },
+        compare_tangerine_options: { type: 'boolean', description: 'Defaults to true; set false only if the customer explicitly wants contributions-only math.' },
       },
-      required: ['starting_amount', 'monthly', 'months'],
+      required: [],
     },
   },
   {
@@ -126,7 +133,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'prepare_support_preview',
-    description: 'Prepare a human-support preview (concept only; nothing is sent or booked) with the customer’s questions.',
+    description: 'Prepare a human-support preview when the customer asks for help, expresses frustration, or accepts an offer to prepare questions for an advisor (concept only; nothing is sent or booked).',
     parameters: { type: 'object', properties: { questions: { type: 'array', items: { type: 'string' } } }, required: ['questions'] },
   },
 ];
@@ -136,18 +143,35 @@ type ToolResult = Record<string, unknown>;
 const PERSONAL_RE =
   /\bmy (balance|balances|account|accounts|chequing|savings|money|cash|income|spending|budget|situation|numbers)\b|this money|that money|how much (do|can|could|should|would) i|what (can|could) i (save|afford)|\bscenario\b|\bcan i afford\b|use my (account|details)/;
 const SUPPORT_RE = /human|person|advis|someone|support|talk to|speak (to|with)|call (me|them|tangerine)|representative|appointment|prepare.{0,20}questions|questions? (for|to ask)|(?:write|make|draft).{0,20}questions/;
+const FRUSTRATION_RE = /frustrat|annoy|useless|waste of time|not helping|don['’]t understand|can['’]t you just|ridiculous|angry|upset|fed up|unhelpful/i;
+const SUPPORT_AFFIRMATIVE_RE = /^(?:yes|yeah|yep|sure|okay|ok|please|sounds good|go ahead|do that|that would help|that'd help)\b/i;
+const SUPPORT_OFFER_RE = /\b(?:advisor|adviser|representative|human|person|support)\b/i;
+const SUPPORT_PREPARATION_RE = /\b(?:prepare|draft|questions|connect|talk|speak|conversation)\b/i;
 const SUMMARY_RE = /summar|recap|wrap (it )?up|save (this|our|the) conversation|print/;
 const BROWSE_RE = /\b(all|every|full list|browse|everything|other options|whole catalogue)\b/;
-const OFFERINGS_RE = /tangerine|option|product|account|fund|gic|tfsa|rrsp|rsp|rif|fhsa|portfolio|offer|compare|what can|recommend|suggest|chequing|checking|savings|usd|credit card|money.?back|cash.?back|mortgage|heloc|line of credit|payroll|direct deposit/;
+const OFFERINGS_RE = /tangerine|option|product|account|fund|gic|tfsa|rrsp|rsp|rif|fhsa|portfolio|offer|compare|what can|recommend|suggest|chequing|checking|savings|usd|credit card|mastercard|money.?back|cash.?back|scene\+|mortgage|heloc|line of credit|payroll|direct deposit/;
+const OFFERING_NAMED_RE = /\b(?:credit cards?|mastercards?|money.?back|cash.?back|world elite|scene\+)\b/i;
+const PRODUCT_FAMILY_RE = /\b(?:credit cards?|mastercards?|mortgages?|chequing|checking|savings accounts?|gics?|tfsas?|rrsps?|rsps?|rifs?|mutual funds?|investment funds?|lines? of credit|heloc|business banking|business accounts?|personal loans?|fhsas?|first.home savings accounts?)\b/i;
 
 function acceptsSupportOffer(ctx: ToolContext): boolean {
-  if (!/^(?:yes|yeah|yep|sure|okay|ok|please|that would help|sounds good)\b/i.test(ctx.latestCustomer.trim())) return false;
-  const previousSunny = [...ctx.req.messages].slice(0, -1).reverse().find((m) => m.role === 'sunny')?.text ?? '';
-  return /\b(?:advisor|adviser|person|support)\b/i.test(previousSunny) &&
-    /\b(?:prepare|draft|questions|talk|speak|conversation)\b/i.test(previousSunny);
+  if (!SUPPORT_AFFIRMATIVE_RE.test(ctx.latestCustomer.trim())) return false;
+  const previousMessage = ctx.req.messages.at(-2);
+  if (previousMessage?.role !== 'sunny') return false;
+  return SUPPORT_OFFER_RE.test(previousMessage.text) && SUPPORT_PREPARATION_RE.test(previousMessage.text);
 }
 
-function productSuggestionReason(ctx: ToolContext): string {
+function accountSignals(ctx: ToolContext): OfferingSignals {
+  const account = ctx.req.permission === 'granted' ? ctx.req.account : null;
+  const unassignedCash = unassigned(ctx, 'chequing');
+  return {
+    hasUnassignedCash: unassignedCash === null ? undefined : unassignedCash > 0,
+    chequingSurplusSignal: account ? account.signal?.shown ?? false : undefined,
+    monthlyExpenses: account?.monthlyExpenses,
+    hasSavingsAccount: account && account.savingsBalance > 0 ? true : undefined,
+  };
+}
+
+function productSuggestionReason(ctx: ToolContext, ids: string[], signals: OfferingSignals): string {
   const goalLabels: Record<string, string> = {
     build_wealth: 'building wealth and learning about investing',
     accessible_interest: 'keeping money accessible while earning interest',
@@ -163,11 +187,19 @@ function productSuggestionReason(ctx: ToolContext): string {
   };
   const goal = ctx.context.goal?.type ? goalLabels[ctx.context.goal.type] : null;
   const horizon = ctx.context.horizon ? horizonLabels[ctx.context.horizon] : null;
+  const names = ids.map((id) => OFFERINGS.find((offering) => offering.id === id)?.name).filter(Boolean);
+  const signalContext = `Account signals considered: unassigned cash ${signals.hasUnassignedCash === undefined ? 'unknown' : signals.hasUnassignedCash ? 'present' : 'not indicated'}, chequing surplus ${signals.chequingSurplusSignal === undefined ? 'unknown' : signals.chequingSurplusSignal ? 'active' : 'not active'}, monthly expenses ${signals.monthlyExpenses === undefined ? 'not shared' : 'shared'}, Tangerine Savings Account ${signals.hasSavingsAccount ? 'indicated by a positive balance' : 'unknown'}.`;
+  if (ids.length === 1) {
+    return `You asked about ${names[0]}; here are its key features, terms and trade-offs to explore. ${signalContext}`;
+  }
+  if (ids.length > 1 && ids.some((id) => ['money-back-card', 'money-back-world', 'rewards-world-elite'].includes(id))) {
+    return `You asked about Tangerine credit cards, so these related card options are grouped together for comparison. ${signalContext}`;
+  }
   if (!goal && !horizon) {
-    return 'You asked for product suggestions; without a confirmed goal or timeline, this is a general starting set to compare—not a personal suitability assessment.';
+    return `You asked for product suggestions; without a confirmed goal or timeline, these ${ids.length} products are a general starting set to compare. ${signalContext}`;
   }
   const basis = [goal && `your goal of ${goal}`, horizon && `your timeframe of ${horizon}`].filter(Boolean).join(' and ');
-  return `Because you shared ${basis}, these are options to compare—not a personal suitability assessment. No pressure to choose any.`;
+  return `Because you shared ${basis}, these ${ids.length} products offer different features and trade-offs to compare. ${signalContext}`;
 }
 
 /** What the customer's own words must contain for each recorded choice (meaning check on top of the quote check). */
@@ -271,31 +303,112 @@ function recordAllocation(args: Record<string, unknown>, ctx: ToolContext): Tool
 }
 
 function calculate(args: Record<string, unknown>, ctx: ToolContext): ToolResult {
-  const start = args.starting_amount;
-  const monthly = args.monthly;
-  const months = args.months;
-  const target = typeof args.target === 'number' ? args.target : null;
-  // Every value must come from a customer message or the computed not-yet-assigned amount.
   const customerText = normalizeText(ctx.req.messages.filter((m) => m.role === 'customer').map((m) => m.text).join(' \n '));
-  const stated = new Set(findAmounts(customerText).map((a) => (a.negative ? -a.value : a.value)));
-  const statedMonths = new Set(findDurations(customerText));
-  const derived = new Set([unassigned(ctx, 'chequing'), ...ctx.context.allocations.map((a) => a.amount)].filter((n): n is number => n !== null));
-  const ok = (n: unknown) => typeof n === 'number' && (n === 0 || stated.has(n) || derived.has(n));
-  if (!ok(start) || !ok(monthly) || !(typeof months === 'number' && (statedMonths.has(months) || stated.has(months))) || (target !== null && !stated.has(target))) {
+  const latestAmounts = findAmounts(ctx.latestCustomer).filter((amount) => !amount.negative).map((amount) => amount.value);
+  const allStatedAmounts = new Set(findAmounts(customerText).filter((amount) => !amount.negative).map((amount) => amount.value));
+  const available = ctx.req.permission === 'granted' ? unassigned(ctx, 'chequing') : null;
+  const monthlyMentioned = /(?:per|a|each)\s+month|monthly/i.test(ctx.latestCustomer);
+  const inferredMonthly = monthlyMentioned && latestAmounts.length === 1 ? latestAmounts[0] : undefined;
+  const monthly = args.monthly === undefined ? inferredMonthly ?? 0 : args.monthly;
+  const candidateStartingAmounts = latestAmounts.filter((amount) => amount !== monthly);
+  const inferredStarting = candidateStartingAmounts.length === 1 ? candidateStartingAmounts[0] : undefined;
+  const start = args.starting_amount === undefined ? inferredStarting ?? available ?? 0 : args.starting_amount;
+  const startingAmountWasStated = inferredStarting !== undefined || (typeof start === 'number' && allStatedAmounts.has(start));
+
+  // Every non-default value must come from the customer or permissioned account context.
+  const derived = new Set([available, ...ctx.context.allocations.map((a) => a.amount)].filter((n): n is number => n !== null));
+  const allowedAmount = (value: unknown) =>
+    typeof value === 'number' &&
+    isValidAmount(value) &&
+    (value === 0 || allStatedAmounts.has(value) || derived.has(value));
+  if (typeof start !== 'number' || typeof monthly !== 'number' || !allowedAmount(start) || !allowedAmount(monthly)) {
     return {
-      status: 'not_needed',
-      instruction: 'Only calculate with values the customer gave (or the amount not yet assigned). Ask for any missing value instead of assuming.',
+      status: 'rejected',
+      reason: 'amount_not_grounded_or_invalid',
+      instruction: 'Use only customer-stated amounts or the permissioned not-yet-assigned balance; ask for clarification instead of assuming.',
     };
   }
-  const input = { start: start as number, monthly: monthly as number, months: months as number, target };
-  const r = projectWithoutReturns(input);
-  if (!r.valid) return { status: 'rejected', errors: r.errors, instruction: 'Ask the customer for valid values.' };
-  upsertEffect(ctx, 'scenario', { type: 'scenario', input });
+
+  const defaultYears = ctx.context.horizon === 'under_1_year'
+    ? 1
+    : ctx.context.horizon === 'over_5_years'
+      ? 10
+      : 5;
+  const explicitYears = args.years;
+  const explicitMonths = args.months;
+  const latestDurations = findDurations(ctx.latestCustomer);
+  const statedDuration = latestDurations.at(-1);
+  let years: number;
+  if (explicitYears !== undefined) {
+    if (typeof explicitYears !== 'number') {
+      return { status: 'rejected', reason: 'invalid_years', instruction: `Use a whole-year horizon from 1 to ${MAX_WEALTH_YEARS}.` };
+    }
+    years = explicitYears;
+    if (statedDuration !== undefined && statedDuration % 12 !== 0) {
+      return { status: 'needs_clarification', instruction: 'Ask the customer to choose a whole number of years for the comparison.' };
+    }
+    if ((statedDuration !== undefined && statedDuration !== years * 12) || (statedDuration === undefined && years !== defaultYears)) {
+      return { status: 'not_needed', instruction: 'Use a whole-year horizon the customer stated or the context-aware default; ask how many years if unclear.' };
+    }
+  } else if (explicitMonths !== undefined) {
+    if (typeof explicitMonths !== 'number' || !Number.isInteger(explicitMonths) || explicitMonths < 1 ||
+      statedDuration !== explicitMonths || explicitMonths % 12 !== 0) {
+      return { status: 'needs_clarification', instruction: 'Ask the customer to choose a whole number of years for the comparison.' };
+    }
+    years = explicitMonths / 12;
+  } else {
+    if (statedDuration !== undefined && statedDuration % 12 !== 0) {
+      return { status: 'needs_clarification', instruction: 'Ask the customer to choose a whole number of years for the comparison.' };
+    }
+    years = statedDuration !== undefined ? statedDuration / 12 : defaultYears;
+  }
+  if (!Number.isInteger(years) || years < 1 || years > MAX_WEALTH_YEARS) {
+    return { status: 'rejected', reason: 'invalid_years', instruction: `Use a whole-year horizon from 1 to ${MAX_WEALTH_YEARS}.` };
+  }
+
+  const mentionedRates = [...customerText.matchAll(/(-?\d+(?:\.\d+)?)\s*(?:%|percent\b)/gi)].map((match) => Number(match[1]));
+  const customRate = args.annual_rate === undefined ? DEFAULT_ILLUSTRATIVE_FUND_RATE : args.annual_rate;
+  if (
+    typeof customRate !== 'number' ||
+    (args.annual_rate !== undefined && !mentionedRates.includes(customRate))
+  ) {
+    return { status: 'not_needed', instruction: 'Use the default illustrative 5% rate, or only a custom annual rate the customer explicitly stated.' };
+  }
+
+  const comparison = projectWealthComparison({
+    startingAmount: start,
+    monthlyContribution: monthly,
+    years,
+    customRate,
+  });
+  if (!comparison.valid) return { status: 'rejected', errors: comparison.errors, instruction: 'Ask the customer for valid amounts, rate, or timeframe.' };
+  const compareTangerineOptions = args.compare_tangerine_options !== false;
+  const options = compareTangerineOptions
+    ? comparison.options
+    : comparison.options.filter((option) => option.id === 'contributionsOnly');
+  const scenario = {
+    years: comparison.years,
+    startingAmount: comparison.startingAmount,
+    monthlyContribution: comparison.monthlyContribution,
+    customRate: comparison.customRate,
+    compareTangerineOptions,
+    totalContributions: comparison.totalContributions,
+    options,
+    yearlyBreakdown: comparison.yearlyBreakdown,
+  };
+  upsertEffect(ctx, 'scenario', { type: 'scenario', ...scenario });
+  const startingAmountSource = [
+    start === available && available !== null
+      ? 'The starting amount uses the permissioned not-yet-assigned chequing balance.'
+      : '',
+    start === 0 && monthly > 0 && !startingAmountWasStated
+      ? 'No starting lump sum was specified, so use $0 and ask briefly whether the customer would like to include one.'
+      : '',
+  ].filter(Boolean).join(' ');
   return {
     status: 'calculated',
-    input,
-    result: { contributions: r.contributions, total: r.total, gapAtEnd: r.gapAtEnd, monthlyThatReachesTarget: r.requiredMonthly },
-    note: 'Contributions only: no interest or investment returns, not a forecast. The app shows a scenario card.',
+    ...scenario,
+    note: `${startingAmountSource} Show the interactive comparison. Savings uses a variable 0.30% base-rate assumption; GIC benchmarks are fixed-rate assumptions and not a live quote; the illustrative fund rate is hypothetical, not guaranteed, and fund fees are not deducted.`,
   };
 }
 
@@ -365,37 +478,53 @@ function run(name: string, args: Record<string, unknown>, ctx: ToolContext): Too
         return { status: 'not_needed', instruction: 'Introduce offerings once the customer has a stated goal or asks about options.' };
       }
       const requested = validateOfferingIds(args.offering_ids);
-      const browsing = BROWSE_RE.test(latest);
-      if (!requested.length && !browsing) return { status: 'rejected', reason: 'no_valid_offering_ids', validIds: OFFERINGS.map((o) => o.id) };
-      // Same deterministic rule as the scripted engine: goal + timeline shape the initial set.
-      // The full catalogue is available only when the customer explicitly asks to browse or names those products.
-      const plan = offeringPlan(ctx.context.goal?.type ?? null, ctx.context.horizon);
+      const browseRequested = BROWSE_RE.test(latest);
+      if (!requested.length && !browseRequested && !OFFERINGS_RE.test(latest)) return { status: 'rejected', reason: 'no_valid_offering_ids', validIds: OFFERINGS.map((o) => o.id) };
       const named = namedOfferingIds(latest);
-      const ids = browsing ? OFFERINGS.map((offering) => offering.id) : [...new Set([...requested.filter((id) => plan.ids.includes(id)), ...named])];
-      const finalIds = ids.length ? ids : plan.ids;
+      const familyIntent = PRODUCT_FAMILY_RE.test(latest);
+      const knownIds = named.filter((id) => OFFERINGS.some((offering) => offering.id === id));
+      const asksAboutCardFamily = OFFERING_NAMED_RE.test(latest) &&
+        /\b(?:credit cards?|mastercards?)\b/i.test(latest) &&
+        !/\b(?:money.?back.{0,12}world|money.?back.{0,12}card|cash.?back|world elite|scene\+)\b/i.test(latest);
+      if (familyIntent && !knownIds.length && !asksAboutCardFamily) {
+        return {
+          status: 'not_in_catalogue',
+          instruction: 'Answer the customer’s question directly using any verified knowledge entries, and do NOT surface unrelated savings/investment/card product cards.',
+        };
+      }
+      const browsing = browseRequested && !familyIntent;
+      const signals = accountSignals(ctx);
+      const plan = offeringPlan(ctx.context.goal?.type ?? null, ctx.context.horizon, signals);
+      const finalIds = browsing
+        ? OFFERINGS.map((offering) => offering.id)
+        : initialOfferingIds(ctx.context.goal?.type ?? null, ctx.context.horizon, named, latest, signals);
       const dropped = requested.filter((id) => !finalIds.includes(id));
-      const reason = BROWSE_RE.test(latest) ? String(args.reason ?? '').slice(0, 200) : productSuggestionReason(ctx);
-      const featuredId = browsing
-        ? undefined
-        : named.find((id) => OFFERINGS.find((offering) => offering.id === id)?.availability !== 'unconfirmed') ??
-          (finalIds.includes(plan.featuredId) ? plan.featuredId : finalIds.find((id) => id !== 'advisors' && OFFERINGS.find((offering) => offering.id === id)?.availability !== 'unconfirmed'));
-      const featuredReason = featuredId
-        ? offeringRecommendationReason(featuredId, ctx.context.goal?.type ?? null, ctx.context.horizon)
-        : undefined;
+      const reason = browsing ? String(args.reason ?? '').slice(0, 200) : productSuggestionReason(ctx, finalIds, signals);
+      const plannedFeaturedId = finalIds.includes(plan.featuredId) ? plan.featuredId : finalIds[0];
+      const featuredId = browsing ? undefined : named.find((id) => finalIds.includes(id)) ?? plannedFeaturedId;
+      const reasons = browsing ? undefined : offeringReasons(finalIds, ctx.context.goal?.type ?? null, ctx.context.horizon, signals);
       const promotionIds = eligiblePromotionIds(finalIds, ctx.latestCustomer);
       ctx.context = { ...ctx.context, offeringsShown: [...new Set([...ctx.context.offeringsShown, ...finalIds])] };
       upsertEffect(ctx, 'offeringsShown', {
         type: 'offeringsShown',
         ids: finalIds,
         reason,
+        ...(reasons ? { reasons } : {}),
         ...(promotionIds.length ? { promotionIds } : {}),
-        ...(featuredId && featuredReason ? { featuredId, featuredReason } : {}),
+        ...(featuredId ? { featuredId } : {}),
+        ...(browsing ? { browseAll: true } : {}),
       });
       return {
         status: 'shown',
         offerings: finalIds.map((id) => OFFERINGS.find((o) => o.id === id)),
         emphasis: plan.emphasis,
-        ...(featuredId && featuredReason ? { featured: { id: featuredId, reason: featuredReason } } : {}),
+        signalContext: {
+          hasUnassignedCash: signals.hasUnassignedCash ?? null,
+          chequingSurplusSignal: signals.chequingSurplusSignal ?? null,
+          monthlyExpensesShared: signals.monthlyExpenses !== undefined,
+          hasSavingsAccount: signals.hasSavingsAccount ?? null,
+        },
+        ...(featuredId ? { featured: { id: featuredId, reason: reasons?.[featuredId] } } : {}),
         ...(dropped.length ? { notShown: dropped, note: `Not shown yet for this timeline (${ctx.context.horizon ?? 'not stated'}): ${dropped.join(', ')}. The customer can ask to browse all offerings.` } : {}),
         instruction:
           (plan.emphasis === 'access'
@@ -403,7 +532,7 @@ function run(name: string, args: Record<string, unknown>, ctx: ToolContext): Too
             : plan.emphasis === 'flexible'
               ? 'Timeline unclear: keep options flexible and ask roughly when they might need the money. '
               : '') +
-          'The card shows features, fees and risks. Explain why they’re relevant to explore using what the customer said, not that they’re suitable or best. Keep choices voluntary and do not imply the customer must act.',
+          'Show exactly the products returned by the app: specific product questions show only directly relevant products, known product-family questions stay within that family, and only broad exploration uses offeringPlan. Use signalContext in the reason/instruction; for short horizons with a chequing surplus emphasize liquidity/no lock-in, for 1–5 years explain GIC lock-in, and for long horizons explain market risk. For Money-Back cards, explain that depositing rewards into a Tangerine Savings Account unlocks a third 2% category when the account is not known to exist. Explain key trade-offs, keep choices voluntary, and never call a product suitable or best.',
       };
     }
     case 'record_next_step': {
@@ -425,7 +554,8 @@ function run(name: string, args: Record<string, unknown>, ctx: ToolContext): Too
       upsertEffect(ctx, 'summaryReady', { type: 'summaryReady' });
       return { status: 'ready', instruction: 'Tell the customer their summary is ready to review.' };
     case 'prepare_support_preview': {
-      if (!SUPPORT_RE.test(latest) && !acceptsSupportOffer(ctx)) {
+      const isFrustrated = FRUSTRATION_RE.test(latest);
+      if (!SUPPORT_RE.test(latest) && !isFrustrated && !acceptsSupportOffer(ctx)) {
         return { status: 'not_needed', instruction: 'The customer did not ask for support or accept an offer to prepare for it.' };
       }
       const questions = (Array.isArray(args.questions) ? args.questions : [])
@@ -433,7 +563,12 @@ function run(name: string, args: Record<string, unknown>, ctx: ToolContext): Too
         .map((q) => q.trim().slice(0, 200))
         .slice(0, 5);
       upsertEffect(ctx, 'handoffReady', { type: 'handoffReady', questions });
-      return { status: 'ready', instruction: 'Say a concept preview is ready; nothing is sent or booked.' };
+      return {
+        status: 'ready',
+        instruction: isFrustrated && questions.length === 0
+          ? 'Acknowledge their frustration warmly without defensiveness, let them know a concept support preview is ready, and highlight that they can connect directly with a real Tangerine representative or advisor (nothing is sent or booked in this prototype).'
+          : 'Say a concept preview is ready; nothing is sent or booked.',
+      };
     }
     default:
       return { status: 'error', reason: 'unknown_tool' };

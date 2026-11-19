@@ -5,7 +5,7 @@
  */
 import type { Allocation, Purpose } from '../domain/allocations';
 import { findAmounts } from '../lib/parse';
-import { getOffering, resolveSignupProduct, type GoalType } from '../shared/offerings';
+import { getOffering, namedOfferingIds, resolveSignupProduct, type GoalType } from '../shared/offerings';
 import type { ConversationState, CustomerTurn, Horizon, NextStepId, SunnyEvent } from './types';
 
 const has = (text: string, re: RegExp) => re.test(text);
@@ -116,6 +116,13 @@ function classify(raw: string, state: ConversationState): SunnyEvent {
     !has(t, /what is|what are|what's the difference/)
   ) {
     return { type: 'askInvestment' };
+  }
+  if (
+    (namedOfferingIds(raw).length > 0 || has(t, /\b(?:credit cards?|mastercards?)\b/)) &&
+    (has(t, /\b(?:tell me|more about|information on|details on|which|recommend|suggest|offerings?)\b/) ||
+      has(t, /\bwhat\b.{0,50}\b(?:does|do)\s+tangerine\b.{0,30}\boffer\b/))
+  ) {
+    return { type: 'showOfferings' };
   }
   if (
     has(t, /(?:which|what|recommend|suggest).{0,35}\b(?:tangerine )?(?:products?|accounts?|options?)\b/) &&

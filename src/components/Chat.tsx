@@ -8,7 +8,8 @@ import { TOPIC_MENU } from '../conversation/navigation';
 import type { Purpose } from '../domain/allocations';
 import { isValidAmount, isValidMonths, MAX_MONTHS, parseAmount } from '../lib/calc';
 import { LIMITS } from '../shared/api';
-import { AllocationCard, EducationCard, FactsUpdatedCard, OfferingsCard, ScenarioCard, SignupCard, SignalCard, SourceList } from './Cards';
+import { SUPPORT_LINKS } from '../shared/offerings';
+import { AllocationCard, EducationCard, FactsUpdatedCard, OfferingsCard, ScenarioCard, SignupCard, SignalCard, SourceList, SupportChannelsCard, WealthComparisonCard } from './Cards';
 import { PlanPanel } from './PlanPanel';
 import { RichText } from './RichText';
 import { SunnyOrb } from './SunnyOrb';
@@ -268,16 +269,20 @@ function MessageRow({
         {card?.kind === 'education' && <EducationCard topic={card.topic} />}
         {card?.kind === 'signal' && <SignalCard signal={signalFor(state)} observationDays={state.signalConfig.observationDays} />}
         {card?.kind === 'allocations' && <AllocationCard snapshot={card.snapshot} />}
-        {card?.kind === 'offerings' && <OfferingsCard ids={card.ids} reason={card.reason} featuredId={card.featuredId} featuredReason={card.featuredReason} promotionIds={card.promotionIds} onExplore={onExploreOffering} />}
+        {card?.kind === 'offerings' && <OfferingsCard ids={card.ids} reason={card.reason} reasons={card.reasons} featuredId={card.featuredId} promotionIds={card.promotionIds} onExplore={onExploreOffering} />}
         {card?.kind === 'signup' && <SignupCard productId={card.productId} promotionIds={card.promotionIds} />}
         {card?.kind === 'scenario' && (
           <ScenarioCard input={card.input} hypothetical={card.hypothetical} outdated={JSON.stringify(card.input) !== currentScenario} />
         )}
+        {card?.kind === 'wealthComparison' && <WealthComparisonCard comparison={card.comparison} />}
         {card?.kind === 'factsUpdated' && <FactsUpdatedCard changes={card.changes} />}
         {card?.kind === 'action' && (
-          <button type="button" className="btn btn-secondary action-button" onClick={() => onOpen(card.action)}>
-            {card.action === 'summary' ? 'Review your summary' : 'Review the support preview'}
-          </button>
+          <>
+            <button type="button" className="btn btn-secondary action-button" onClick={() => onOpen(card.action)}>
+              {card.action === 'summary' ? 'Review your summary' : 'Review the support preview'}
+            </button>
+            {card.action === 'handoff' && <SupportChannelsCard />}
+          </>
         )}
         {card?.kind === 'error' && (
           <div className="error-card" role="alert">
@@ -304,6 +309,9 @@ function MessageRow({
               </div>
             )}
           </div>
+        )}
+        {sunny && message.sources?.some((sourceId) => SUPPORT_LINKS.some((link) => link.sourceId === sourceId)) && (
+          <SupportChannelsCard />
         )}
         {message.sources && message.sources.length > 0 && <SourceList ids={message.sources} />}
       </div>

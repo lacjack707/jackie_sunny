@@ -25,5 +25,6 @@ describe('findDurations', () => {
     expect(findDurations('in 3 years')).toEqual([36]);
     expect(findDurations('about 18 months')).toEqual([18]);
     expect(findDurations('2.5 yrs')).toEqual([30]);
+    expect(findDurations('Compare 5-year savings options')).toEqual([60]);
   });
 });

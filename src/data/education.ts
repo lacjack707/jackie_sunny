@@ -305,12 +305,11 @@ export const TOPICS: Record<TopicId, TopicContent> = {
     question: 'What about saving for a first home?',
     title: 'Saving for a first home',
     body: [
-      'An FHSA is a registered account for first-time buyers: contributions are generally deductible and qualifying withdrawals for a first home are tax-free. A TFSA is another flexible option. The minimum down payment in Canada starts at 5% for homes up to $500,000, and closing costs come on top.',
-      'I couldn’t confirm that we currently offer an FHSA, so our team can confirm that for you.',
+      'Tangerine does not currently offer an FHSA. An FHSA is a registered plan designed to help eligible first-time home buyers save toward a first home tax-free. Tangerine’s first-home article also discusses the Home Buyers’ Plan in the context of an RSP; its government-rule details are dated. Tangerine TFSA and RSP accounts are alternatives people often compare, without one being right for everyone.',
     ],
-    simple: 'There are accounts with tax perks for a first home. I couldn’t confirm that we offer an FHSA, so our team can confirm.',
-    sources: ['gov-fhsa-overview', 'fcac-down-payment', 'tng-fhsa-status'],
-    related: ['need_next_year', 'tfsa', 'horizon'],
+    simple: 'Tangerine doesn’t currently offer an FHSA. A TFSA or RSP may be worth comparing for a first-home goal; the right choice depends on your situation.',
+    sources: ['tng-fhsa-status', 'tng-first-home-article', 'tng-tfsa-options', 'tng-rsp-options'],
+    related: ['need_next_year', 'tfsa', 'tfsa_vs_rrsp', 'horizon'],
     draft: false,
   },
   fhsa_tangerine: {
@@ -318,11 +317,11 @@ export const TOPICS: Record<TopicId, TopicContent> = {
     question: 'Does Tangerine offer an FHSA?',
     title: 'FHSA at Tangerine',
     body: [
-      'I can’t confirm that. Our information page for AI systems lists FHSAs, but I couldn’t find an FHSA product page, and our Invest and GIC pages don’t list one. Our team can confirm directly.',
+      'Tangerine does not currently offer an FHSA. Tangerine’s first-home education explains the account as a way for eligible first-time buyers to save toward a home tax-free; customers often compare a TFSA or RSP as Tangerine options, without a specific recommendation.',
     ],
-    simple: 'I’m not sure, and I don’t want to guess. Our team can confirm for you.',
-    sources: ['tng-fhsa-status', 'tng-contact'],
-    related: ['contact', 'tfsa'],
+    simple: 'Tangerine doesn’t currently offer an FHSA. You could compare a Tangerine TFSA or RSP for a first-home goal.',
+    sources: ['tng-fhsa-status', 'tng-first-home-article'],
+    related: ['tfsa', 'tfsa_vs_rrsp'],
     draft: false,
   },
   advisors: {

@@ -15,7 +15,7 @@ import {
   type ChatResponse,
   type ConversationContext,
 } from '../src/shared/api.ts';
-import { eligiblePromotionIds, OFFERINGS, offeringPlan, resolveSignupProduct, validateOfferingIds } from '../src/shared/offerings.ts';
+import { eligiblePromotionIds, initialOfferingIds, namedOfferingIds, OFFERINGS, resolveSignupProduct, validateOfferingIds } from '../src/shared/offerings.ts';
 import { findAmounts } from '../src/lib/parse.ts';
 import { KNOWLEDGE, retrieve, validateSourceIds } from '../src/shared/knowledge.ts';
 import { SYSTEM_INSTRUCTIONS, turnContext } from './prompt.ts';
@@ -149,10 +149,19 @@ export function sanitizeRequest(body: unknown): ChatRequest {
 function productSuggestionReply(effects: ChatResponse['effects']): string | null {
   const shown = effects.find((effect) => effect.type === 'offeringsShown');
   if (!shown) return null;
-  const featured = shown.featuredId ? OFFERINGS.find((offering) => offering.id === shown.featuredId) : undefined;
-  const names = shown.ids.map((id) => OFFERINGS.find((offering) => offering.id === id)?.name).filter(Boolean);
-  if (!names.length) return null;
-  return `${featured ? `A specific Tangerine product to explore first is ${featured.name}. ${shown.featuredReason ?? ''}` : `Here are Tangerine products to explore: ${names.join(', ')}.`} ${shown.reason} The cards explain their features and trade-offs; they’re optional to explore, not a personal suitability assessment.`;
+  if (!shown.ids.length) return null;
+  const explanations = shown.ids.map((id) => {
+    const product = OFFERINGS.find((offering) => offering.id === id);
+    const rationale = shown.reasons?.[id];
+    return product ? `${product.name}: ${rationale ?? product.summary}` : null;
+  }).filter((line): line is string => Boolean(line));
+  return `Here are three Tangerine products to explore. ${shown.reason} ${explanations.join(' ')}`;
+}
+
+function signupReply(product: (typeof OFFERINGS)[number]): string {
+  const conditions = product.conditions.filter((condition) => /annual fee|income/i.test(condition));
+  const terms = conditions.length ? ` Published terms include ${conditions.join('; ')}.` : '';
+  return `I can help you take the next step for the ${product.name}.${terms} Use the clickable card to open Tangerine’s official page. These conditions do not confirm your eligibility or approval; the prototype never collects application information or submits an application.`;
 }
 
 /** Knowledge retrieval uses the latest two customer messages plus the previous Sunny reply. */
@@ -337,7 +346,12 @@ export async function runChatTurn(
       }
       const recommendationRequest = requestsProductSuggestions(ctx.latestCustomer);
       if (recommendationRequest && !ctx.effects.some((effect) => effect.type === 'offeringsShown')) {
-        const ids = offeringPlan(ctx.context.goal?.type ?? null, ctx.context.horizon).ids;
+        const ids = initialOfferingIds(
+          ctx.context.goal?.type ?? null,
+          ctx.context.horizon,
+          namedOfferingIds(ctx.latestCustomer),
+          ctx.latestCustomer,
+        );
         executeTool(
           'show_offerings',
           JSON.stringify({ offering_ids: ids, reason: '' }),
@@ -360,14 +374,14 @@ export async function runChatTurn(
       }
       return {
         reply: stripInlineCitations(
-          (signupProduct ? `I can help you take the next step for the ${signupProduct.name}. Review the checklist, then continue on Tangerine’s official page if you choose. This prototype doesn’t submit an application, check approval, or send your information.` : null) ??
+          (signupProduct ? signupReply(signupProduct) : null) ??
           (recommendationRequest ? productSuggestionReply(ctx.effects) : null) ??
           parsed.reply,
         ).slice(0, LIMITS.maxReplyChars),
         sourceIds: validateSourceIds(signupProduct ? [signupProduct.sources[0]] : parsed.source_ids),
         suggestions: (Array.isArray(parsed.suggestions) ? parsed.suggestions : [])
           .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-          .map((s) => s.trim().slice(0, 80))
+          .map((s) => s.trim().slice(0, 60))
           .slice(0, LIMITS.maxSuggestions),
         effects: ctx.effects,
       };
