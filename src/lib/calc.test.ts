@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bandForMonths, calculateScenario, homeSavingsAfterReserve, monthlyCashFlow, parseAmount, projectWealthComparison } from './calc';
+import { bandForMonths, calculateMortgageScenario, calculateScenario, homeSavingsAfterReserve, monthlyCashFlow, parseAmount, projectWealthComparison } from './calc';
 
 describe('calculateScenario', () => {
   it('matches the default confirmed scenario for Alex', () => {
@@ -110,6 +110,61 @@ describe('projectWealthComparison', () => {
       annualRate: 3.6,
       endingBalance: 2236,
       totalGrowth: 36,
+    });
+  });
+
+  describe('calculateMortgageScenario', () => {
+    it('uses Canadian semi-annual compounding for monthly and biweekly payment estimates', () => {
+      const monthly = calculateMortgageScenario({
+        mode: 'payment',
+        homePrice: 500_000,
+        downPayment: 100_000,
+        annualRate: 4.79,
+        amortizationYears: 25,
+      });
+      expect(monthly).toMatchObject({
+        valid: true,
+        mortgageAmount: 400_000,
+        annualRate: 4.79,
+        amortizationYears: 25,
+        paymentFrequency: 'monthly',
+        termYears: 5,
+      });
+      expect(monthly.regularPayment).toBeGreaterThan(2200);
+      expect(monthly.regularPayment).toBeLessThan(2400);
+      expect(monthly.principalPaidInTerm).toBeGreaterThan(0);
+      expect(monthly.interestPaidInTerm).toBeGreaterThan(monthly.principalPaidInTerm);
+      expect(monthly.totalPaymentsInTerm).toBeCloseTo(monthly.principalPaidInTerm + monthly.interestPaidInTerm, 1);
+
+      const biweekly = calculateMortgageScenario({
+        mode: 'payment',
+        mortgageAmount: 400_000,
+        annualRate: 4.79,
+        amortizationYears: 25,
+        paymentFrequency: 'biweekly',
+      });
+      expect(biweekly.valid).toBe(true);
+      expect(biweekly.regularPayment).toBeGreaterThan(1000);
+      expect(biweekly.regularPayment).toBeLessThan(monthly.regularPayment);
+      expect(Math.abs(biweekly.monthlyPayment - monthly.monthlyPayment)).toBeLessThan(5);
+    });
+
+    it('estimates affordability from GDS/TDS limits and rejects invalid figures', () => {
+      const estimate = calculateMortgageScenario({
+        mode: 'affordability',
+        annualIncome: 120_000,
+        monthlyDebts: 500,
+        downPayment: 50_000,
+        annualRate: 4.79,
+      });
+      expect(estimate.valid).toBe(true);
+      expect(estimate.gdsMonthlyLimit).toBe(3900);
+      expect(estimate.tdsMonthlyLimit).toBe(3900);
+      expect(estimate.monthlyHousingPaymentLimit).toBe(3900);
+      expect(estimate.maxPurchasePrice).toBeGreaterThan(estimate.maxMortgageAmount);
+      expect(estimate.monthlyPayment).toBe(3900);
+      expect(calculateMortgageScenario({ mode: 'payment', homePrice: 100_000, downPayment: 120_000 }).valid).toBe(false);
+      expect(calculateMortgageScenario({ mode: 'affordability', annualIncome: -1 }).valid).toBe(false);
     });
   });
 

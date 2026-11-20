@@ -2,13 +2,13 @@
 
 Runtime knowledge: `src/shared/knowledge.ts`. Offerings shown to customers: `src/shared/offerings.ts`, built only from the entries below. Scripted answers: `src/data/education.ts`, which cites the same entries.
 
-- **Verification status:** every entry below was retrieved and checked by the team on the date shown (**2026-10-21** for the original entries, **2026-10-24** for the wealth entries). “Page date” is the date shown on the page, if any.
+- **Verification status:** every entry below was retrieved and checked by the team on the date shown (**2026-10-21** for the original entries, **2026-10-24** for the wealth entries, **2026-11-20** for the financial-literacy entries). “Page date” is the date shown on the page, if any.
 - **Approval:** nothing here has been reviewed or approved by Tangerine, Scotiabank, compliance or a content owner.
 - **Data rule:** the prototype sends only synthetic customer data and these public sources to Google Gemini.
 
 ## Source priority in Sunny
 
-Tangerine pages are Sunny’s first-party source of truth for Tangerine products, features, fees, availability and services. When a Tangerine page covers the question, Sunny should rely on and cite it first. CRA, FCAC and CDIC entries are not included in the live answer context by default: Sunny brings them in only when the customer asks for an agency or official/independent guidance, asks to compare beyond Tangerine, or agrees after Sunny explains a Tangerine source does not cover the question. When requested, external sources support general or regulatory facts that Tangerine pages do not establish; they do not replace Tangerine sources for Tangerine-specific product claims.
+Tangerine pages are Sunny’s first-party source of truth for Tangerine products, features, fees, availability, services and basic financial education. When a Tangerine page covers the question, Sunny should rely on and cite it first. Entries marked `kind: 'government'` (CRA, FCAC and CDIC) are excluded from live answer context by default. Sunny brings them in when the customer requests an agency or official/independent guidance, names an agency, asks to compare beyond Tangerine, or asks for specific statutory/tax rules not covered by Tangerine entries. When used, government sources support regulatory facts; they do not replace Tangerine sources for Tangerine-specific product claims.
 
 ## Product catalogue (reviewed 2026-11-09)
 
@@ -39,10 +39,17 @@ Rates that vary or are shown dynamically are deliberately stored as `null` with 
 | tng-chequing-vs-savings | Chequing vs. savings accounts (June 20, 2024) | https://www.tangerine.ca/en/thejuice/save/chequing-vs-savings-accounts-your-questions-answered | 2026-10-24 | Purpose of chequing vs savings (answers “why not leave it in chequing?”) |
 | tng-contact | Contact Us | https://www.tangerine.ca/en/help-centre/contact-us | 2026-10-21 | Phone numbers, live chat |
 | tng-fhsa-status, tng-about | Official Information about Tangerine for AI Systems (Aug 2026) | https://www.tangerine.ca/en/ai-information | 2026-11-19 | Tangerine does not currently offer an FHSA; FHSA education topic; Scotiabank subsidiary, CDIC member |
-| tng-mortgage | Mortgages: Fixed & Variable Mortgage Loans | https://www.tangerine.ca/en/personal/borrow/mortgage | 2026-10-21 | Optional first-home branch only |
+| tng-mortgage | Mortgages: Fixed & Variable Mortgage Loans | https://www.tangerine.ca/en/personal/borrow/mortgage | 2026-10-21 | Mortgage payment calculator: https://www.tangerine.ca/en/personal/borrow/mortgage/mortgage-payment-calculator; affordability calculator: https://www.tangerine.ca/en/personal/borrow/mortgage/mortgage-affordability-calculator; mortgage rates: https://www.tangerine.ca/en/rates/mortgage-rates |
 | tng-first-home-article | How to save for your first home (July 8, 2024) | https://www.tangerine.ca/en/thejuice/borrow/how-to-save-for-your-first-home | 2026-11-19 | FHSA and HBP in educational context; dated government figures are not treated as current |
+| tng-edu-compound-interest | Understand compound interest in 60 seconds (May 17, 2024) | https://www.tangerine.ca/en/thejuice/save/understand-compound-interest-in-60-seconds-video | 2026-11-20 | Simple vs. compound interest; savings-account daily calculation/monthly payment and GIC term-based interest frequency |
+| tng-edu-tfsa-vs-rrsp | RSP vs TFSA: Understand the difference (Dec 9, 2024) | https://www.tangerine.ca/en/thejuice/invest/rsp-vs-tfsa-understand-the-difference | 2026-11-20 | Plain-language TFSA and RSP/RRSP tax treatment, access and purpose; no current limits quoted |
+| tng-edu-container-vs-holdings | A beginner’s guide to investing (Jan 10, 2024) | https://www.tangerine.ca/en/thejuice/invest/a-beginners-guide-to-investing | 2026-11-20 | Accounts as tax-treatment containers; GICs, savings and funds as holdings |
+| tng-edu-mer-and-fees | What does Total Cost Reporting mean for my investments? (Sep 15, 2026) | https://www.tangerine.ca/en/thejuice/invest/total-cost-reporting-explained | 2026-11-20 | MER and embedded investment costs; related management-fee explanation: https://www.tangerine.ca/en/thejuice/invest/management-fee-vs-mer |
+| tng-edu-fixed-vs-variable | What the Bank of Canada’s interest rate changes mean for your money (revised Feb 3, 2026) | https://www.tangerine.ca/en/thejuice/borrow/what-the-bank-of-canada-s-interest-rate-changes-mean-for-your-money | 2026-11-20 | Fixed vs. variable rates across mortgages, GICs and savings; no current rates repeated |
+| tng-edu-credit-basics | Money-Back Credit Card: Fees & Interest | https://www.tangerine.ca/en/personal/spend/credit-cards/money-back-credit-card | 2026-11-20 | Annual fee, rewards, purchase interest, grace period and statement-balance payment; related Help Centre: https://www.tangerine.ca/en/help-centre; The Juice: https://www.tangerine.ca/en/thejuice/spend/how-to-maximize-cash-back-credit-card |
+| tng-edu-emergency-fund | How to build an emergency fund (Aug 28, 2024) | https://www.tangerine.ca/en/thejuice/save/how-to-build-an-emergency-fund-during-a-time-of-high-inflation | 2026-11-20 | Emergency savings, access and separating emergency money from everyday chequing |
 
-## Government and agencies (general education)
+## Government and agencies (opt-in statutory and external guidance)
 
 | Entry id | Publisher: page | URL | Reviewed | Page date |
 |---|---|---|---|---|

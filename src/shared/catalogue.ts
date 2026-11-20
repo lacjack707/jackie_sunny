@@ -11,7 +11,7 @@ export interface CatalogueSource {
   title: string;
   url: string;
   publisher: string;
-  kind: 'tangerine' | 'general';
+  kind: 'tangerine' | 'government';
   reviewed: string;
   keywords: string[];
 }

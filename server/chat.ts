@@ -19,7 +19,7 @@ import { eligiblePromotionIds, initialOfferingIds, namedOfferingIds, OFFERINGS, 
 import { findAmounts } from '../src/lib/parse.ts';
 import { KNOWLEDGE, retrieve, validateSourceIds } from '../src/shared/knowledge.ts';
 import { SYSTEM_INSTRUCTIONS, turnContext } from './prompt.ts';
-import { executeTool, TOOL_DEFINITIONS, type ToolContext } from './tools.ts';
+import { accountSignals, executeTool, isMortgageCalculatorRequest, offeringContextForTurn, TOOL_DEFINITIONS, type ToolContext } from './tools.ts';
 
 /** A tool call requested by the model; `arguments` is a JSON string. */
 export interface ToolCall {
@@ -146,22 +146,73 @@ export function sanitizeRequest(body: unknown): ChatRequest {
   };
 }
 
-function productSuggestionReply(effects: ChatResponse['effects']): string | null {
+function recommendationBullet(id: string, ctx: ToolContext): string {
+  const { goal, horizon } = offeringContextForTurn(ctx);
+  const timeframe = horizon === 'under_1_year'
+    ? 'for a short timeframe'
+    : horizon === '1_to_5_years'
+      ? 'over one to five years'
+      : horizon === 'over_5_years'
+        ? 'over a longer timeframe'
+        : '';
+  switch (id) {
+    case 'savings-account':
+      return `Keeps money accessible${goal === 'first_home' ? ' for a first-home goal' : timeframe ? ` ${timeframe}` : ''}; its interest rate can change.`;
+    case 'tfsa':
+      return `A registered account to compare${goal === 'first_home' ? ' for a first-home goal' : timeframe ? ` ${timeframe}` : ''}; its holdings affect access and risk.`;
+    case 'gic':
+      return `Offers a set term${timeframe ? ` ${timeframe}` : ''}; funds are generally locked in until maturity.`;
+    case 'rsp':
+      return 'A registered account to compare; tax treatment and withdrawal rules differ from a TFSA.';
+    case 'investment-funds':
+      return `An investing option to learn about${timeframe ? ` ${timeframe}` : ''}; fund values fluctuate and can fall.`;
+    case 'money-back-card':
+      return 'Offers cash back in chosen categories; carrying a balance incurs interest.';
+    case 'money-back-world':
+      return 'Adds World Mastercard insurance and travel benefits; income criteria apply and carrying a balance incurs interest.';
+    case 'rewards-world-elite':
+      return 'Earns Scene+ points and includes travel benefits; the $120 annual fee and income criteria apply.';
+    default: {
+      const product = OFFERINGS.find((offering) => offering.id === id);
+      return product ? `${product.summary} Review its terms and trade-offs.` : 'Review its features and trade-offs.';
+    }
+  }
+}
+
+function productSuggestionReply(effects: ChatResponse['effects'], ctx: ToolContext): string | null {
   const shown = effects.find((effect) => effect.type === 'offeringsShown');
   if (!shown) return null;
   if (!shown.ids.length) return null;
   const explanations = shown.ids.map((id) => {
     const product = OFFERINGS.find((offering) => offering.id === id);
-    const rationale = shown.reasons?.[id];
-    return product ? `${product.name}: ${rationale ?? product.summary}` : null;
+    return product ? `- ${product.name}: ${recommendationBullet(id, ctx)}` : null;
   }).filter((line): line is string => Boolean(line));
-  return `Here are three Tangerine products to explore. ${shown.reason} ${explanations.join(' ')}`;
+  const context = offeringContextForTurn(ctx);
+  const hasContext = Boolean(context.goal || context.horizon || (ctx.req.permission === 'granted' && ctx.req.account));
+  const followup = !hasContext ? '\nWhat goal or timeframe would you like to focus on?' : '';
+  return `${shown.reason}\n${explanations.join('\n')}${followup}`;
 }
 
 function signupReply(product: (typeof OFFERINGS)[number]): string {
   const conditions = product.conditions.filter((condition) => /annual fee|income/i.test(condition));
   const terms = conditions.length ? ` Published terms include ${conditions.join('; ')}.` : '';
   return `I can help you take the next step for the ${product.name}.${terms} Use the clickable card to open Tangerine’s official page. These conditions do not confirm your eligibility or approval; the prototype never collects application information or submits an application.`;
+}
+
+function includeScenarioSummary(reply: string, rounds: ToolRound[]): string {
+  for (const round of [...rounds].reverse()) {
+    for (const result of [...round.results].reverse()) {
+      if (result.name !== 'calculate_scenario') continue;
+      const output = JSON.parse(result.output) as { status?: string; summaryText?: string };
+      if (output.status !== 'calculated' || !output.summaryText) return reply;
+      const requiredAmounts = new Set(findAmounts(output.summaryText).map((amount) => amount.value));
+      const replyAmounts = new Set(findAmounts(reply).map((amount) => amount.value));
+      return [...requiredAmounts].every((amount) => replyAmounts.has(amount))
+        ? reply
+        : `${reply}\n${output.summaryText}.`;
+    }
+  }
+  return reply;
 }
 
 /** Knowledge retrieval uses the latest two customer messages plus the previous Sunny reply. */
@@ -193,14 +244,21 @@ function requestsExternalSources(req: ChatRequest): boolean {
   const agreesToOfferedSource =
     /^(?:yes|yeah|yep|sure|okay|ok|please|that would help|that'd help|sounds good)\b/i.test(latestCustomer) &&
     /\b(?:cra|canada revenue agency|fcac|cdic|official external|external guidance|outside source|independent source)\b/i.test(previousSunny);
+  const asksForUncoveredTaxOrStatutoryRules =
+    /\b(?:contribution (?:room|limits?|rules?)|over.?contribut\w*|tax rules?|tax law|tax limits?|deduction limits?|withdrawal rules?|withdrawal limits?|withholding tax|penalt(?:y|ies))\b/.test(customerText) ||
+    /\b(?:tfsa|rrsp|rsp|fhsa|hbp)\b.{0,50}\b(?:limits?|room|rules?|repayment)\b/.test(customerText) ||
+    /\b(?:limits?|room|rules?|repayment)\b.{0,50}\b(?:tfsa|rrsp|rsp|fhsa|hbp)\b/.test(customerText) ||
+    /\b(?:tax(?:es|ation)?|taxable)\b.{0,50}\b(?:withdraw|tfsa|rrsp|rsp|fhsa|hbp|contribution)\b/.test(customerText) ||
+    /\b(?:withdraw|tfsa|rrsp|rsp|fhsa|hbp|contribution)\b.{0,50}\b(?:tax(?:es|ation)?|taxable)\b/.test(customerText);
   return (
     agreesToOfferedSource ||
-    /\b(cra|canada revenue agency|fcac|financial consumer agency|cdic|canada deposit insurance)\b/.test(customerText) ||
+    /\b(?:cra|canada revenue agency|fcac|financial consumer agency(?: of canada)?|cdic|canada deposit insurance(?: corporation)?|government of canada)\b/.test(customerText) ||
     /\b(outside|beyond)\s+(?:of\s+)?tangerine\b/.test(customerText) ||
     /\b(explore|look|learn|read|see|show)\b.{0,40}\b(other providers|other banks|outside|beyond)\b/.test(customerText) ||
     /\b(outside|beyond|independent|external|third.party|broader)\b.{0,50}\b(source|guidance|information|rules|options|provider|bank)\b/.test(customerText) ||
     /\b(other banks|other providers|another bank|non.tangerine)\b/.test(customerText) ||
-    /\b(compare|comparison)\b.{0,60}\b(outside|beyond|other|another|non.tangerine|different provider|different bank)\b/.test(customerText)
+    /\b(compare|comparison)\b.{0,60}\b(outside|beyond|other|another|non.tangerine|different provider|different bank)\b/.test(customerText) ||
+    asksForUncoveredTaxOrStatutoryRules
   );
 }
 
@@ -211,7 +269,8 @@ function requestsProductSuggestions(text: string): boolean {
     /\bwhat (?:do|would|could) you recommend\b/.test(t) ||
     /\b(?:which|what) (?:tangerine )?(?:products?|accounts?|options?)\b.{0,50}\b(?:should|could|would) i (?:consider|explore|choose|use|open)\b/.test(t) ||
     /\b(?:recommend(?:ation|ations)?|suggest(?:ion|ions)?)\b.{0,60}\b(?:tangerine|product|account|option|savings|tfsa|rrsp|gic|fund|portfolio)\b/.test(t) ||
-    /\b(?:tangerine )?(?:products?|accounts?|options?|savings|tfsa|rrsp|gics?|funds?|portfolios?)\b.{0,60}\b(?:recommend|suggest)\b/.test(t)
+    /\b(?:tangerine )?(?:products?|accounts?|options?|savings|tfsa|rrsp|gics?|funds?|portfolios?)\b.{0,60}\b(?:recommend|suggest)\b/.test(t) ||
+    (/\b(?:best for|fit me)\b/.test(t) && /\b(?:tangerine|products?|accounts?|options?|savings|tfsa|rrsp|gics?|funds?|portfolio)\b/.test(t))
   );
 }
 
@@ -346,11 +405,13 @@ export async function runChatTurn(
       }
       const recommendationRequest = requestsProductSuggestions(ctx.latestCustomer);
       if (recommendationRequest && !ctx.effects.some((effect) => effect.type === 'offeringsShown')) {
+        const turnContext = offeringContextForTurn(ctx);
         const ids = initialOfferingIds(
-          ctx.context.goal?.type ?? null,
-          ctx.context.horizon,
+          turnContext.goal,
+          turnContext.horizon,
           namedOfferingIds(ctx.latestCustomer),
           ctx.latestCustomer,
+          accountSignals(ctx),
         );
         executeTool(
           'show_offerings',
@@ -358,10 +419,14 @@ export async function runChatTurn(
           ctx,
         );
       }
+      let mortgageSummary: string | null = null;
+      if (isMortgageCalculatorRequest(ctx.latestCustomer) && !ctx.effects.some((effect) => effect.type === 'mortgageScenario')) {
+        const mortgageResult = JSON.parse(executeTool('calculate_mortgage', '{}', ctx)) as { summaryText?: string; status?: string };
+        if (mortgageResult.status === 'calculated' && typeof mortgageResult.summaryText === 'string') mortgageSummary = mortgageResult.summaryText;
+      }
       const signupProductId = resolveSignupProduct(
         ctx.latestCustomer,
-        req.messages.filter((message) => message.role === 'sunny').slice(-5).reverse().map((message) => message.text),
-        ctx.context.offeringsShown,
+        req.messages.slice(0, -1).reverse().map((message) => message.text),
       );
       const signupProduct = signupProductId ? OFFERINGS.find((offering) => offering.id === signupProductId) : undefined;
       if (signupProductId && signupProduct && !ctx.effects.some((effect) => effect.type === 'signupPrepared')) {
@@ -372,11 +437,15 @@ export async function runChatTurn(
           ...(promotionIds.length ? { promotionIds } : {}),
         });
       }
+      const baseReply = stripInlineCitations(
+        (signupProduct ? signupReply(signupProduct) : null) ??
+        (recommendationRequest ? productSuggestionReply(ctx.effects, ctx) : null) ??
+        parsed.reply,
+      );
       return {
-        reply: stripInlineCitations(
-          (signupProduct ? signupReply(signupProduct) : null) ??
-          (recommendationRequest ? productSuggestionReply(ctx.effects) : null) ??
-          parsed.reply,
+        reply: (
+          includeScenarioSummary(baseReply, rounds) +
+          (mortgageSummary ? ` ${mortgageSummary} This uses an illustrative rate and is not a Tangerine quote or mortgage approval.` : '')
         ).slice(0, LIMITS.maxReplyChars),
         sourceIds: validateSourceIds(signupProduct ? [signupProduct.sources[0]] : parsed.source_ids),
         suggestions: (Array.isArray(parsed.suggestions) ? parsed.suggestions : [])

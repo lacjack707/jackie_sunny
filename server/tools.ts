@@ -9,8 +9,10 @@
  */
 import {
   DEFAULT_ILLUSTRATIVE_FUND_RATE,
+  DEFAULT_WEALTH_YEARS,
   isValidAmount,
   MAX_WEALTH_YEARS,
+  calculateMortgageScenario,
   projectWealthComparison,
 } from '../src/lib/calc.ts';
 import { findAmounts, findDurations, normalizeText } from '../src/lib/parse.ts';
@@ -26,10 +28,11 @@ import {
   type ConversationContext,
   type GoalKey,
   type HorizonKey,
+  type MortgageScenarioDTO,
   type NextStepKey,
   type PurposeKey,
 } from '../src/shared/api.ts';
-import { eligiblePromotionIds, initialOfferingIds, namedOfferingIds, OFFERINGS, offeringPlan, offeringReasons, validateOfferingIds, type OfferingSignals } from '../src/shared/offerings.ts';
+import { eligiblePromotionIds, initialOfferingIds, namedOfferingIds, OFFERINGS, offeringContextForMessages, offeringPlan, offeringReasons, validateOfferingIds, type OfferingSignals } from '../src/shared/offerings.ts';
 
 export interface ToolContext {
   req: ChatRequest;
@@ -95,9 +98,8 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         offering_ids: { type: 'array', items: { type: 'string' } },
-        reason: { type: 'string', description: 'Connect the options to the customer’s stated goal or timeframe without judging whether a product is right for them.' },
       },
-      required: ['offering_ids', 'reason'],
+      required: ['offering_ids'],
     },
   },
   {
@@ -127,6 +129,26 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: 'calculate_mortgage',
+    description:
+      'Build an illustrative mortgage payment or affordability calculator. Use only amounts the customer stated. The default 4.79% rate is an illustrative assumption, not a Tangerine quote or approval.',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['payment', 'affordability'] },
+        home_price: { type: 'number' },
+        mortgage_amount: { type: 'number' },
+        down_payment: { type: 'number' },
+        annual_income: { type: 'number', description: 'Only use an income figure the customer stated.' },
+        monthly_debts: { type: 'number', description: 'Only use a debt figure the customer stated; defaults to zero.' },
+        annual_rate: { type: 'number', description: 'Customer-stated rate in percent; defaults to the illustrative 4.79% assumption.' },
+        amortization_years: { type: 'integer', description: 'Customer-stated whole years; defaults to 25.' },
+        payment_frequency: { type: 'string', enum: ['monthly', 'biweekly'] },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'prepare_summary',
     description: 'Prepare the conversation summary for the customer to review.',
     parameters: { type: 'object', properties: {}, required: [] },
@@ -149,9 +171,15 @@ const SUPPORT_OFFER_RE = /\b(?:advisor|adviser|representative|human|person|suppo
 const SUPPORT_PREPARATION_RE = /\b(?:prepare|draft|questions|connect|talk|speak|conversation)\b/i;
 const SUMMARY_RE = /summar|recap|wrap (it )?up|save (this|our|the) conversation|print/;
 const BROWSE_RE = /\b(all|every|full list|browse|everything|other options|whole catalogue)\b/;
-const OFFERINGS_RE = /tangerine|option|product|account|fund|gic|tfsa|rrsp|rsp|rif|fhsa|portfolio|offer|compare|what can|recommend|suggest|chequing|checking|savings|usd|credit card|mastercard|money.?back|cash.?back|scene\+|mortgage|heloc|line of credit|payroll|direct deposit/;
+const OFFERINGS_RE = /recommend|suggest|best for|fit me|tangerine|option|product|account|fund|gic|tfsa|rrsp|rsp|portfolio|credit card|mastercard|offer|compare|what can|rif|fhsa|chequing|checking|savings|usd|money.?back|cash.?back|scene\+|mortgage|heloc|line of credit|payroll|direct deposit/i;
 const OFFERING_NAMED_RE = /\b(?:credit cards?|mastercards?|money.?back|cash.?back|world elite|scene\+)\b/i;
-const PRODUCT_FAMILY_RE = /\b(?:credit cards?|mastercards?|mortgages?|chequing|checking|savings accounts?|gics?|tfsas?|rrsps?|rsps?|rifs?|mutual funds?|investment funds?|lines? of credit|heloc|business banking|business accounts?|personal loans?|fhsas?|first.home savings accounts?)\b/i;
+const PRODUCT_FAMILY_RE = /\b(?:credit cards?|mastercards?|mortgages?|savings accounts?|gics?|tfsas?|rrsps?|rsps?|rifs?|mutual funds?|investment funds?|lines? of credit|heloc|business banking|business accounts?|personal loans?|fhsas?|first.home savings accounts?)\b/i;
+const MORTGAGE_CALCULATOR_RE =
+  /\bmortgage\b.{0,60}\b(?:payment|afford(?:ability)?|calculator|calculate|monthly|rates?|options?)\b|\b(?:mortgage )?(?:payment|affordability) calculator\b|\bhow much (?:house|home)\b.{0,50}\b(?:afford|buy|qualify)\b|\b(?:afford|qualify)\b.{0,50}\b(?:house|home|mortgage)\b|\bmonthly payment\b.{0,40}\b(?:home|house|mortgage)\b|\b(?:check|see|show|explore)\b.{0,50}\b(?:live )?mortgage rates?\b|\bexplore\b.{0,50}\btangerine mortgage options?\b/i;
+
+export function isMortgageCalculatorRequest(text: string): boolean {
+  return MORTGAGE_CALCULATOR_RE.test(text);
+}
 
 function acceptsSupportOffer(ctx: ToolContext): boolean {
   if (!SUPPORT_AFFIRMATIVE_RE.test(ctx.latestCustomer.trim())) return false;
@@ -160,7 +188,7 @@ function acceptsSupportOffer(ctx: ToolContext): boolean {
   return SUPPORT_OFFER_RE.test(previousMessage.text) && SUPPORT_PREPARATION_RE.test(previousMessage.text);
 }
 
-function accountSignals(ctx: ToolContext): OfferingSignals {
+export function accountSignals(ctx: ToolContext): OfferingSignals {
   const account = ctx.req.permission === 'granted' ? ctx.req.account : null;
   const unassignedCash = unassigned(ctx, 'chequing');
   return {
@@ -169,6 +197,11 @@ function accountSignals(ctx: ToolContext): OfferingSignals {
     monthlyExpenses: account?.monthlyExpenses,
     hasSavingsAccount: account && account.savingsBalance > 0 ? true : undefined,
   };
+}
+
+export function offeringContextForTurn(ctx: ToolContext): { goal: GoalKey | null; horizon: HorizonKey | null } {
+  const customerMessages = ctx.req.messages.filter((message) => message.role === 'customer').map((message) => message.text);
+  return offeringContextForMessages(ctx.context.goal?.type ?? null, ctx.context.horizon, customerMessages);
 }
 
 function productSuggestionReason(ctx: ToolContext, ids: string[], signals: OfferingSignals): string {
@@ -185,21 +218,30 @@ function productSuggestionReason(ctx: ToolContext, ids: string[], signals: Offer
     over_5_years: 'more than five years',
     not_sure: 'an uncertain timeframe',
   };
-  const goal = ctx.context.goal?.type ? goalLabels[ctx.context.goal.type] : null;
-  const horizon = ctx.context.horizon ? horizonLabels[ctx.context.horizon] : null;
+  const turnContext = offeringContextForTurn(ctx);
+  const goal = turnContext.goal ? goalLabels[turnContext.goal] : null;
+  const horizon = turnContext.horizon ? horizonLabels[turnContext.horizon] : null;
   const names = ids.map((id) => OFFERINGS.find((offering) => offering.id === id)?.name).filter(Boolean);
-  const signalContext = `Account signals considered: unassigned cash ${signals.hasUnassignedCash === undefined ? 'unknown' : signals.hasUnassignedCash ? 'present' : 'not indicated'}, chequing surplus ${signals.chequingSurplusSignal === undefined ? 'unknown' : signals.chequingSurplusSignal ? 'active' : 'not active'}, monthly expenses ${signals.monthlyExpenses === undefined ? 'not shared' : 'shared'}, Tangerine Savings Account ${signals.hasSavingsAccount ? 'indicated by a positive balance' : 'unknown'}.`;
-  if (ids.length === 1) {
-    return `You asked about ${names[0]}; here are its key features, terms and trade-offs to explore. ${signalContext}`;
-  }
-  if (ids.length > 1 && ids.some((id) => ['money-back-card', 'money-back-world', 'rewards-world-elite'].includes(id))) {
-    return `You asked about Tangerine credit cards, so these related card options are grouped together for comparison. ${signalContext}`;
-  }
+  const isCardFamily = ids.some((id) => ['money-back-card', 'money-back-world', 'rewards-world-elite'].includes(id));
+  if (ids.length === 1) return `You asked about ${names[0]}; its features and trade-offs are shown below.`;
+  if (isCardFamily) return 'You asked about Tangerine credit cards; these related options are grouped for comparison.';
+
+  const activeSignal = ctx.req.permission === 'granted'
+    ? signals.hasUnassignedCash === true
+      ? 'you have not-yet-assigned cash in your chequing account'
+      : signals.chequingSurplusSignal === true
+        ? 'you shared a chequing-balance pattern that suggests a surplus'
+        : ''
+    : '';
   if (!goal && !horizon) {
-    return `You asked for product suggestions; without a confirmed goal or timeline, these ${ids.length} products are a general starting set to compare. ${signalContext}`;
+    return activeSignal
+      ? `Since ${activeSignal}, these are three versatile Tangerine starting options to compare.`
+      : `Here are ${ids.length} versatile Tangerine starting options to compare.`;
   }
   const basis = [goal && `your goal of ${goal}`, horizon && `your timeframe of ${horizon}`].filter(Boolean).join(' and ');
-  return `Because you shared ${basis}, these ${ids.length} products offer different features and trade-offs to compare. ${signalContext}`;
+  return activeSignal
+    ? `Since ${activeSignal}, and based on ${basis}, these options have different features and trade-offs to compare.`
+    : `Based on ${basis}, these options have different features and trade-offs to compare.`;
 }
 
 /** What the customer's own words must contain for each recorded choice (meaning check on top of the quote check). */
@@ -333,34 +375,16 @@ function calculate(args: Record<string, unknown>, ctx: ToolContext): ToolResult 
     ? 1
     : ctx.context.horizon === 'over_5_years'
       ? 10
-      : 5;
-  const explicitYears = args.years;
-  const explicitMonths = args.months;
+      : DEFAULT_WEALTH_YEARS;
   const latestDurations = findDurations(ctx.latestCustomer);
-  const statedDuration = latestDurations.at(-1);
-  let years: number;
-  if (explicitYears !== undefined) {
-    if (typeof explicitYears !== 'number') {
-      return { status: 'rejected', reason: 'invalid_years', instruction: `Use a whole-year horizon from 1 to ${MAX_WEALTH_YEARS}.` };
-    }
-    years = explicitYears;
-    if (statedDuration !== undefined && statedDuration % 12 !== 0) {
+  const comparativeDuration = /\b(?:more than|over|at least)\s+(?:the\s+next\s+)?\d+(?:\.\d+)?\s*(?:years?|yrs?|months?|mos?)\b/i.test(ctx.latestCustomer);
+  const statedDuration = comparativeDuration ? undefined : latestDurations.at(-1);
+  let years = defaultYears;
+  if (statedDuration !== undefined) {
+    if (statedDuration % 12 !== 0) {
       return { status: 'needs_clarification', instruction: 'Ask the customer to choose a whole number of years for the comparison.' };
     }
-    if ((statedDuration !== undefined && statedDuration !== years * 12) || (statedDuration === undefined && years !== defaultYears)) {
-      return { status: 'not_needed', instruction: 'Use a whole-year horizon the customer stated or the context-aware default; ask how many years if unclear.' };
-    }
-  } else if (explicitMonths !== undefined) {
-    if (typeof explicitMonths !== 'number' || !Number.isInteger(explicitMonths) || explicitMonths < 1 ||
-      statedDuration !== explicitMonths || explicitMonths % 12 !== 0) {
-      return { status: 'needs_clarification', instruction: 'Ask the customer to choose a whole number of years for the comparison.' };
-    }
-    years = explicitMonths / 12;
-  } else {
-    if (statedDuration !== undefined && statedDuration % 12 !== 0) {
-      return { status: 'needs_clarification', instruction: 'Ask the customer to choose a whole number of years for the comparison.' };
-    }
-    years = statedDuration !== undefined ? statedDuration / 12 : defaultYears;
+    years = statedDuration / 12;
   }
   if (!Number.isInteger(years) || years < 1 || years > MAX_WEALTH_YEARS) {
     return { status: 'rejected', reason: 'invalid_years', instruction: `Use a whole-year horizon from 1 to ${MAX_WEALTH_YEARS}.` };
@@ -397,6 +421,10 @@ function calculate(args: Record<string, unknown>, ctx: ToolContext): ToolResult 
     yearlyBreakdown: comparison.yearlyBreakdown,
   };
   upsertEffect(ctx, 'scenario', { type: 'scenario', ...scenario });
+  const money = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const summaryText = options
+    .map((option) => `${option.label}: ending balance ${money.format(option.endingBalance)}, total growth ${money.format(option.totalGrowth)}`)
+    .join('; ');
   const startingAmountSource = [
     start === available && available !== null
       ? 'The starting amount uses the permissioned not-yet-assigned chequing balance.'
@@ -408,7 +436,101 @@ function calculate(args: Record<string, unknown>, ctx: ToolContext): ToolResult 
   return {
     status: 'calculated',
     ...scenario,
+    summaryText,
     note: `${startingAmountSource} Show the interactive comparison. Savings uses a variable 0.30% base-rate assumption; GIC benchmarks are fixed-rate assumptions and not a live quote; the illustrative fund rate is hypothetical, not guaranteed, and fund fees are not deducted.`,
+  };
+}
+
+function calculateMortgage(args: Record<string, unknown>, ctx: ToolContext): ToolResult {
+  if (!isMortgageCalculatorRequest(ctx.latestCustomer)) {
+    return { status: 'not_needed', instruction: 'Use this calculator only for a mortgage options, rate, payment, affordability or explorer request.' };
+  }
+  const text = ctx.req.messages.filter((message) => message.role === 'customer').map((message) => message.text).join(' ');
+  const statedAmounts = new Set(findAmounts(text).filter((amount) => !amount.negative).map((amount) => amount.value));
+  const amountValue = (key: 'home_price' | 'mortgage_amount' | 'down_payment' | 'annual_income' | 'monthly_debts'): number | undefined => {
+    const value = args[key];
+    if (value === undefined) return undefined;
+    if (typeof value !== 'number' || !isValidAmount(value) || (value !== 0 && !statedAmounts.has(value))) return Number.NaN;
+    return value;
+  };
+  const mode = args.mode === 'affordability' || /\b(?:afford|qualify|how much home|home price)\b/i.test(ctx.latestCustomer)
+    ? 'affordability'
+    : 'payment';
+  const homePrice = amountValue('home_price');
+  const mortgageAmount = amountValue('mortgage_amount');
+  const downPayment = amountValue('down_payment');
+  const annualIncome = amountValue('annual_income');
+  const monthlyDebts = amountValue('monthly_debts');
+  if ([homePrice, mortgageAmount, downPayment, annualIncome, monthlyDebts].some((value) => Number.isNaN(value))) {
+    return {
+      status: 'rejected',
+      reason: 'amount_not_grounded_or_invalid',
+      instruction: 'Use only customer-stated mortgage amounts, debts and income. Do not infer income from account data or invent property costs.',
+    };
+  }
+
+  const rate = args.annual_rate;
+  const statedRates = [...ctx.latestCustomer.matchAll(/(\d+(?:\.\d+)?)\s*(?:%|percent\b)/gi)].map((match) => Number(match[1]));
+  if (rate !== undefined && (typeof rate !== 'number' || !Number.isFinite(rate) || (rate !== 4.79 && !statedRates.includes(rate)))) {
+    return { status: 'rejected', reason: 'rate_not_grounded', instruction: 'Use a customer-stated rate or the clearly labeled illustrative 4.79% default.' };
+  }
+  const amortizationYears = args.amortization_years;
+  if (amortizationYears !== undefined && (typeof amortizationYears !== 'number' || (!Number.isInteger(amortizationYears)) || (amortizationYears !== 25 && !findDurations(ctx.latestCustomer).includes(amortizationYears * 12)))) {
+    return { status: 'rejected', reason: 'amortization_not_grounded', instruction: 'Use a customer-stated whole-year amortization or the illustrative 25-year default.' };
+  }
+  if (args.payment_frequency !== undefined && args.payment_frequency !== 'monthly' && args.payment_frequency !== 'biweekly') {
+    return { status: 'rejected', reason: 'invalid_payment_frequency', instruction: 'Use monthly or biweekly payments.' };
+  }
+
+  const calculation = calculateMortgageScenario({
+    mode,
+    ...(homePrice !== undefined ? { homePrice } : {}),
+    ...(mortgageAmount !== undefined ? { mortgageAmount } : {}),
+    ...(downPayment !== undefined ? { downPayment } : {}),
+    ...(annualIncome !== undefined ? { annualIncome } : {}),
+    ...(monthlyDebts !== undefined ? { monthlyDebts } : {}),
+    ...(typeof rate === 'number' ? { annualRate: rate } : {}),
+    ...(typeof amortizationYears === 'number' ? { amortizationYears } : {}),
+    ...(args.payment_frequency === 'biweekly' ? { paymentFrequency: 'biweekly' as const } : {}),
+  });
+  if (!calculation.valid) return { status: 'rejected', errors: calculation.errors, instruction: 'Ask the customer to correct the invalid calculator inputs.' };
+
+  const dto: MortgageScenarioDTO = {
+    mode: calculation.mode,
+    homePrice: calculation.homePrice,
+    mortgageAmount: calculation.mortgageAmount,
+    downPayment: calculation.downPayment,
+    annualIncome: calculation.annualIncome,
+    monthlyDebts: calculation.monthlyDebts,
+    annualRate: calculation.annualRate,
+    amortizationYears: calculation.amortizationYears,
+    paymentFrequency: calculation.paymentFrequency,
+    regularPayment: calculation.regularPayment,
+    monthlyPayment: calculation.monthlyPayment,
+    termYears: calculation.termYears,
+    totalPaymentsInTerm: calculation.totalPaymentsInTerm,
+    principalPaidInTerm: calculation.principalPaidInTerm,
+    interestPaidInTerm: calculation.interestPaidInTerm,
+    gdsMonthlyLimit: calculation.gdsMonthlyLimit,
+    tdsMonthlyLimit: calculation.tdsMonthlyLimit,
+    monthlyHousingPaymentLimit: calculation.monthlyHousingPaymentLimit,
+    maxMortgageAmount: calculation.maxMortgageAmount,
+    maxPurchasePrice: calculation.maxPurchasePrice,
+  };
+  upsertEffect(ctx, 'mortgageScenario', { type: 'mortgageScenario', ...dto });
+  const money = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const summaryText = mode === 'affordability'
+    ? dto.annualIncome > 0
+      ? `Illustrative maximum purchase price ${money.format(dto.maxPurchasePrice)} and monthly housing payment limit ${money.format(dto.monthlyHousingPaymentLimit)}.`
+      : 'The calculator is ready; ask the customer to enter their own annual income and any monthly debts if they want an affordability estimate.'
+    : dto.mortgageAmount > 0
+      ? `${dto.paymentFrequency === 'monthly' ? 'Monthly' : 'Biweekly'} payment ${money.format(dto.regularPayment)}; over five years, principal paid ${money.format(dto.principalPaidInTerm)} and interest paid ${money.format(dto.interestPaidInTerm)}.`
+      : 'The calculator is ready; ask the customer to enter a home price or mortgage amount and down payment to see an illustrative payment.';
+  return {
+    status: 'calculated',
+    ...dto,
+    summaryText,
+    assumptions: 'Illustrative only, using Canadian semi-annual compounding and a 5-year term. The default 4.79% rate is not a Tangerine quote. Affordability uses 39% GDS / 44% TDS and excludes property taxes, heating, condo fees and mortgage insurance.',
   };
 }
 
@@ -494,15 +616,18 @@ function run(name: string, args: Record<string, unknown>, ctx: ToolContext): Too
       }
       const browsing = browseRequested && !familyIntent;
       const signals = accountSignals(ctx);
-      const plan = offeringPlan(ctx.context.goal?.type ?? null, ctx.context.horizon, signals);
+      const currentContext = offeringContextForTurn(ctx);
+      const plan = offeringPlan(currentContext.goal, currentContext.horizon, signals);
       const finalIds = browsing
         ? OFFERINGS.map((offering) => offering.id)
-        : initialOfferingIds(ctx.context.goal?.type ?? null, ctx.context.horizon, named, latest, signals);
+        : initialOfferingIds(currentContext.goal, currentContext.horizon, named, latest, signals);
       const dropped = requested.filter((id) => !finalIds.includes(id));
-      const reason = browsing ? String(args.reason ?? '').slice(0, 200) : productSuggestionReason(ctx, finalIds, signals);
+      const reason = browsing
+        ? 'Browse Tangerine products and compare their features, terms and trade-offs.'
+        : productSuggestionReason(ctx, finalIds, signals);
       const plannedFeaturedId = finalIds.includes(plan.featuredId) ? plan.featuredId : finalIds[0];
       const featuredId = browsing ? undefined : named.find((id) => finalIds.includes(id)) ?? plannedFeaturedId;
-      const reasons = browsing ? undefined : offeringReasons(finalIds, ctx.context.goal?.type ?? null, ctx.context.horizon, signals);
+      const reasons = browsing ? undefined : offeringReasons(finalIds, currentContext.goal, currentContext.horizon, signals);
       const promotionIds = eligiblePromotionIds(finalIds, ctx.latestCustomer);
       ctx.context = { ...ctx.context, offeringsShown: [...new Set([...ctx.context.offeringsShown, ...finalIds])] };
       upsertEffect(ctx, 'offeringsShown', {
@@ -525,14 +650,14 @@ function run(name: string, args: Record<string, unknown>, ctx: ToolContext): Too
           hasSavingsAccount: signals.hasSavingsAccount ?? null,
         },
         ...(featuredId ? { featured: { id: featuredId, reason: reasons?.[featuredId] } } : {}),
-        ...(dropped.length ? { notShown: dropped, note: `Not shown yet for this timeline (${ctx.context.horizon ?? 'not stated'}): ${dropped.join(', ')}. The customer can ask to browse all offerings.` } : {}),
+        ...(dropped.length ? { notShown: dropped, note: `Not shown yet for this timeline (${currentContext.horizon ?? 'not stated'}): ${dropped.join(', ')}. The customer can ask to browse all offerings.` } : {}),
         instruction:
           (plan.emphasis === 'access'
             ? 'Short timeframe: emphasise access, stability and restrictions (e.g. GICs locked until maturity). '
             : plan.emphasis === 'flexible'
               ? 'Timeline unclear: keep options flexible and ask roughly when they might need the money. '
               : '') +
-          'Show exactly the products returned by the app: specific product questions show only directly relevant products, known product-family questions stay within that family, and only broad exploration uses offeringPlan. Use signalContext in the reason/instruction; for short horizons with a chequing surplus emphasize liquidity/no lock-in, for 1–5 years explain GIC lock-in, and for long horizons explain market risk. For Money-Back cards, explain that depositing rewards into a Tangerine Savings Account unlocks a third 2% category when the account is not known to exist. Explain key trade-offs, keep choices voluntary, and never call a product suitable or best.',
+          'Show exactly the products returned by the app: specific product questions show only directly relevant products, known product-family questions stay within that family, and broad recommendations use the three-product plan. Mention account context only when permission is granted and an account signal is active; never repeat diagnostic signal metadata. For short horizons, emphasize liquidity and no lock-in; for 1–5 years, explain GIC lock-in; for long horizons, explain market risk. For Money-Back cards, explain that depositing rewards into a Tangerine Savings Account unlocks a third 2% category when the account is not known to exist. Explain key trade-offs, keep choices voluntary, and never call a product suitable or best.',
       };
     }
     case 'record_next_step': {
@@ -549,6 +674,8 @@ function run(name: string, args: Record<string, unknown>, ctx: ToolContext): Too
     }
     case 'calculate_scenario':
       return calculate(args, ctx);
+    case 'calculate_mortgage':
+      return calculateMortgage(args, ctx);
     case 'prepare_summary':
       if (!SUMMARY_RE.test(latest)) return { status: 'not_needed', instruction: 'The customer did not ask for a summary.' };
       upsertEffect(ctx, 'summaryReady', { type: 'summaryReady' });
